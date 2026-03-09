@@ -71,5 +71,38 @@ export const statValues = {
   6049: 1, // #% increased Cold Damage with Attack Skills
   6050: 1, // #% increased Lightning Damage with Attack Skills
   6136: 1, // #% increased Damage per Power Charge
-  7499: 2 // Gain # Endurance Charge every second if you've been Hit Recently
+  7499: 2, // Gain # Endurance Charge every second if you've been Hit Recently
+  // HeroicTragedy (Kalguuran)
+  14501: 2, // #% increased Ward
+  14506: 1, // #% faster Restoration of Ward
+  22504: 1, // #% chance to Restore Ward when you Block
+  140: 1, // #% faster start of Energy Shield Recharge
+  120: 1, // #% increased Evasion Rating
+  135: 1, // #% increased maximum Energy Shield
+  741: 1, // #% increased Flask Effect Duration
+  22501: 2, // #% increased Damage while you have Unbroken Ward
+  21874: 1, // #% increased Ward from Equipped Armour Items
+  152: 2, // +#% to Chaos Resistance
+  2134: 2, // #% Chance to Block Spell Damage
+  1090: 2, // #% Chance to Block Attack Damage
+  22496: 1, // #% increased Evasion Rating while you have Unbroken Ward
+  22490: 1, // #% increased Ward during any Flask Effect
+  20929: 1, // #% reduced Duration of Self-Damaging Ailments
+  22507: 1, // Remove a random Damaging Ailment when Ward is Restored
+  22495: 1, // #% increased Armour while you have Unbroken Ward
+  22491: 1, // #% chance for Ward to be Restored when you Use a Flask
+  462: 1, // #% increased Flask Charges gained
+  22505: 1, // Iron Flasks gain # charge when your Ward Breaks
+  22502: 2, // Damage Penetrates #% Elemental Resistances while your Ward is Broken
+  22503: 1, // #% increased effect of Non-Curse Auras from your skills while your Ward is Broken
+  846: 1, // #% increased Area of Effect of Aura Skills
+  22500: 1, // +# to Ward per 10 Energy Shield on Equipped Boots
+  22494: 1, // Gain # Frenzy Charge when Ward Breaks
+  423: 1, // #% increased Frenzy Charge Duration
+  22492: 1, // Gain # Endurance Charge when Ward Breaks
+  420: 1, // #% increased Endurance Charge Duration
+  22499: 1, // +# to Ward per 10 Evasion Rating on Equipped Gloves
+  22493: 1, // Gain # Power Charge when Ward Breaks
+  429: 1, // #% increased Power Charge Duration
+  22498: 1 // +# to Ward per 10 Armour on Equipped Helmet
 };

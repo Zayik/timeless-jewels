@@ -15,7 +15,7 @@ func TestReverseGloriousVanity(t *testing.T) {
 	result := calculator.ReverseSearch(passiveIDs, statIDs, data.GloriousVanity, data.Xibaqua, nil)
 	testza.AssertLen(t, result, 7263)
 	testza.AssertLen(t, result[1001], 3)
-	testza.AssertEqual(t, uint32(8), result[1001][1210][statIDs[0]])
+	testza.AssertEqual(t, int32(8), result[1001][1210][statIDs[0]])
 }
 
 func TestReverseElegantHubris(t *testing.T) {
@@ -23,7 +23,7 @@ func TestReverseElegantHubris(t *testing.T) {
 	result := calculator.ReverseSearch(passiveIDs, statIDs, data.ElegantHubris, data.Cadiro, nil)
 	testza.AssertLen(t, result, 2681)
 	testza.AssertLen(t, result[57820], 2)
-	testza.AssertEqual(t, uint32(80), result[57820][1068][statIDs[0]])
+	testza.AssertEqual(t, int32(80), result[57820][1068][statIDs[0]])
 }
 
 func BenchmarkGloriousVanity(b *testing.B) {
