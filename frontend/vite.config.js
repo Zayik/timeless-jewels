@@ -2,6 +2,11 @@ import { sveltekit } from '@sveltejs/kit/vite';
 
 /** @type {import('vite').UserConfig} */
 const config = {
+  server: {
+    fs: {
+      strict: false,
+    }
+  },
   plugins: [sveltekit()],
   // TODO: Remove once vite 4.3 is out
   worker: {

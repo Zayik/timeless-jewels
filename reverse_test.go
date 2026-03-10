@@ -12,7 +12,7 @@ var passiveIDs = []uint32{2211, 662, 2095, 600, 944, 75, 2556, 1094, 2589, 2505,
 
 func TestReverseGloriousVanity(t *testing.T) {
 	statIDs := []uint32{25}
-	result := calculator.ReverseSearch(passiveIDs, statIDs, data.GloriousVanity, data.Xibaqua, nil)
+	result := calculator.ReverseSearch(passiveIDs, statIDs, data.GloriousVanity, data.Xibaqua, 0, 1, nil)
 	testza.AssertLen(t, result, 7294)
 	testza.AssertLen(t, result[3071], 3)
 	testza.AssertEqual(t, int32(9), result[3071][628][statIDs[0]])
@@ -20,7 +20,7 @@ func TestReverseGloriousVanity(t *testing.T) {
 
 func TestReverseElegantHubris(t *testing.T) {
 	statIDs := []uint32{25}
-	result := calculator.ReverseSearch(passiveIDs, statIDs, data.ElegantHubris, data.Cadiro, nil)
+	result := calculator.ReverseSearch(passiveIDs, statIDs, data.ElegantHubris, data.Cadiro, 0, 1, nil)
 	testza.AssertLen(t, result, 2375)
 	testza.AssertLen(t, result[114920], 2)
 	testza.AssertEqual(t, int32(80), result[114920][698][statIDs[0]])
@@ -29,17 +29,17 @@ func TestReverseElegantHubris(t *testing.T) {
 func BenchmarkGloriousVanity(b *testing.B) {
 	b.ReportAllocs()
 	b.Run("cached", func(b *testing.B) {
-		calculator.ReverseSearch(passiveIDs, []uint32{5815}, data.GloriousVanity, data.Xibaqua, nil)
+		calculator.ReverseSearch(passiveIDs, []uint32{5815}, data.GloriousVanity, data.Xibaqua, 0, 1, nil)
 		b.ResetTimer()
 		for range b.N {
-			calculator.ReverseSearch(passiveIDs, []uint32{5815}, data.GloriousVanity, data.Xibaqua, nil)
+			calculator.ReverseSearch(passiveIDs, []uint32{5815}, data.GloriousVanity, data.Xibaqua, 0, 1, nil)
 		}
 	})
 
 	b.Run("uncached", func(b *testing.B) {
 		for range b.N {
 			calculator.ClearCache()
-			calculator.ReverseSearch(passiveIDs, []uint32{5815}, data.GloriousVanity, data.Xibaqua, nil)
+			calculator.ReverseSearch(passiveIDs, []uint32{5815}, data.GloriousVanity, data.Xibaqua, 0, 1, nil)
 		}
 	})
 }
@@ -47,17 +47,17 @@ func BenchmarkGloriousVanity(b *testing.B) {
 func BenchmarkElegantHubris(b *testing.B) {
 	b.ReportAllocs()
 	b.Run("cached", func(b *testing.B) {
-		calculator.ReverseSearch(passiveIDs, []uint32{25}, data.ElegantHubris, data.Cadiro, nil)
+		calculator.ReverseSearch(passiveIDs, []uint32{25}, data.ElegantHubris, data.Cadiro, 0, 1, nil)
 		b.ResetTimer()
 		for range b.N {
-			calculator.ReverseSearch(passiveIDs, []uint32{25}, data.ElegantHubris, data.Cadiro, nil)
+			calculator.ReverseSearch(passiveIDs, []uint32{25}, data.ElegantHubris, data.Cadiro, 0, 1, nil)
 		}
 	})
 
 	b.Run("uncached", func(b *testing.B) {
 		for range b.N {
 			calculator.ClearCache()
-			calculator.ReverseSearch(passiveIDs, []uint32{25}, data.ElegantHubris, data.Cadiro, nil)
+			calculator.ReverseSearch(passiveIDs, []uint32{25}, data.ElegantHubris, data.Cadiro, 0, 1, nil)
 		}
 	})
 }

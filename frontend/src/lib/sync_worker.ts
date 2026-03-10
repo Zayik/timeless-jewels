@@ -23,6 +23,8 @@ const obj = {
       args.stats.map((s) => s.id),
       args.jewel,
       args.conqueror,
+      args.workerId ?? 0,
+      args.numWorkers ?? 1,
       callback
     );
 

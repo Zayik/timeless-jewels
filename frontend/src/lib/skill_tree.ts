@@ -319,6 +319,8 @@ export interface ReverseSearchConfig {
   nodes: number[];
   stats: StatConfig[];
   minTotalWeight: number;
+  workerId?: number;
+  numWorkers?: number;
 }
 
 export interface SearchWithSeed {
