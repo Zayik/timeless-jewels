@@ -29,6 +29,14 @@
   export let disabled: number[] = [];
   export let highlightJewels = false;
 
+  export const centerOnNode = (nodeId: number) => {
+    const node = skillTree.nodes[nodeId];
+    if (!node || !window) return;
+    const pos = calculateNodePos(node, 0, 0, 1);
+    offsetX = (window.innerWidth / 2) * scaling - pos.x;
+    offsetY = (window.innerHeight / 2) * scaling - pos.y;
+  };
+
   const slowTime = derived(t, (values) => {
     if ((!highlighted || !highlighted.length) && !highlightJewels) {
       return 0;

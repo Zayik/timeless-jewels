@@ -5,6 +5,7 @@ export let data;
 export const initializeCrystalline = () => {
   calculator = {
     Calculate: globalThis["go"]["timeless-jewels"]["calculator"]["Calculate"],
+    MassReverseSearch: globalThis["go"]["timeless-jewels"]["calculator"]["MassReverseSearch"],
     ReverseSearch: globalThis["go"]["timeless-jewels"]["calculator"]["ReverseSearch"],
   }
   data = {

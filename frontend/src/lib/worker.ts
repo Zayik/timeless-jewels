@@ -2,7 +2,7 @@
 import SyncWorker from "./sync_worker?worker";
 import * as Comlink from "comlink";
 import type { WorkerType } from "./sync_worker";
-import type { SearchWithSeed, ReverseSearchConfig, SearchResults } from "./skill_tree";
+import type { SearchWithSeed, ReverseSearchConfig, SearchResults, MassReverseSearchConfig, MassSearchResults } from "./skill_tree";
 
 interface WorkerData {
   syncWorker: Worker;
@@ -66,6 +66,57 @@ export const syncWrap = browser ? {
       .sort((a, b) => b.weight - a.weight);
 
     return { raw, grouped: searchGrouped };
+  },
+  massSearch: async (args: MassReverseSearchConfig, callback: (seed: number) => Promise<void>): Promise<MassSearchResults> => {
+    const numWorkers = pool.length;
+    
+    // We run the searches in parallel
+    const promises = pool.map(async (workerData, index) => {
+      return await workerData.syncWrap.massSearch({
+        ...args,
+        workerId: index,
+        numWorkers: numWorkers
+      }, callback);
+    });
+
+    const results = await Promise.all(promises);
+
+    const massResults: { [socketId: number]: SearchResults } = {};
+
+    for (const res of results) {
+      for (const socketIdStr in res.resultsBySocket) {
+        const socketId = parseInt(socketIdStr);
+        if (!massResults[socketId]) {
+          massResults[socketId] = { grouped: {}, raw: [] };
+        }
+        
+        const socketGrouped = massResults[socketId].grouped;
+        const resSocketGrouped = res.resultsBySocket[socketId].grouped;
+        
+        for (const key of Object.keys(resSocketGrouped)) {
+          const numKey = parseInt(key);
+          socketGrouped[numKey] = [
+            ...(socketGrouped[numKey] || []),
+            ...resSocketGrouped[numKey]
+          ];
+        }
+      }
+    }
+
+    // Sort grouped lists and construct raw lists for each socket
+    for (const socketIdStr in massResults) {
+      const socketId = parseInt(socketIdStr);
+      Object.keys(massResults[socketId].grouped).forEach((key) => {
+        const numKey = parseInt(key);
+        massResults[socketId].grouped[numKey] = massResults[socketId].grouped[numKey].sort((a, b) => b.weight - a.weight);
+      });
+      
+      massResults[socketId].raw = Object.values(massResults[socketId].grouped)
+        .flat()
+        .sort((a, b) => b.weight - a.weight);
+    }
+
+    return { resultsBySocket: massResults };
   }
 } : null;
 

@@ -7,7 +7,7 @@
   import { getAffectedNodes, skillTree, translateStat, openTrade } from '../lib/skill_tree';
   import { syncWrap } from '../lib/worker';
   import { proxy } from 'comlink';
-  import type { ReverseSearchConfig, StatConfig } from '../lib/skill_tree';
+  import type { ReverseSearchConfig, StatConfig, MassReverseSearchConfig, MassSearchResults } from '../lib/skill_tree';
   import SearchResults from '../lib/components/SearchResults.svelte';
   import { statValues } from '../lib/values';
   import { data, calculator } from '../lib/types';
@@ -164,6 +164,8 @@
   let minTotalWeight = 0;
   let searching = false;
   let currentSeed = 0;
+  let seedsProcessed = 0;
+  const totalSeeds = () => data.TimelessJewelSeedRanges[searchJewel || selectedJewel?.value || 0]?.Max - data.TimelessJewelSeedRanges[searchJewel || selectedJewel?.value || 0]?.Min || 0;
   let searchResults: SearchResults;
   let searchJewel = 1;
   let searchConqueror = '';
@@ -176,6 +178,7 @@
     searchConqueror = selectedConqueror.value;
     searching = true;
     searchResults = undefined;
+    massSearchResults = undefined;
 
     const query: ReverseSearchConfig = {
       jewel: selectedJewel.value,
@@ -200,7 +203,44 @@
         results = true;
       });
   };
+  let massSearchResults: MassSearchResults | undefined;
+  const massSearch = () => { 
+    if (!selectedJewel || !selectedConqueror) {
+      return;
+    }
 
+    searchJewel = selectedJewel.value;
+    searchConqueror = selectedConqueror.value;
+    searching = true;
+    massSearchResults = undefined;
+    searchResults = undefined;
+    
+    // We ignore disables for Mass Search to keep it uniform and simple across all jewels.
+    const allSockets = Object.keys(skillTree.nodes).filter(k => {
+      const node = skillTree.nodes[parseInt(k)];
+      return node && node.isJewelSocket;
+    }).map(k => parseInt(k));
+    const socketToNodes: { [socketId: number]: number[] } = {};
+    allSockets.forEach(socketId => {
+      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter((n) => n && !n.isJewelSocket && !n.isMastery);
+      const validIndices = affected.map(n => data.TreeToPassive[n.skill]).filter(n => !!n).map(n => n.Index);
+      socketToNodes[socketId] = validIndices;
+    });
+
+    const query: MassReverseSearchConfig = {
+      jewel: selectedJewel.value,
+      conqueror: selectedConqueror.value,
+      socketToNodes,
+      stats: Object.keys(selectedStats).map(stat => selectedStats[stat]),
+      minTotalWeight
+    };
+
+    seedsProcessed = 0; syncWrap.massSearch(query, proxy((s) => { seedsProcessed += 100; })).then((result) => {
+      massSearchResults = result; console.log('MAIN THREAD massSearch result: ', JSON.stringify(result, null, 2));
+      searching = false;
+      results = true;
+    });
+  };
   let highlighted: number[] = [];
   const highlight = (newSeed: number, passives: number[]) => {
     seed = newSeed;
@@ -459,7 +499,9 @@
 
   $: league && localStorage.setItem('league', league.value);
 
-  onMount(() => {
+  let skillTreeComponent: SkillTree;
+
+  onMount(() => {  
     getLeagues();
   });
 </script>
@@ -467,6 +509,7 @@
 <svelte:window on:paste={onPaste} />
 
 <SkillTree
+  bind:this={skillTreeComponent}
   {clickNode}
   {circledNode}
   selectedJewel={selectedJewel?.value}
@@ -495,24 +538,24 @@
               {/if}
             </h3>
           </div>
-          {#if searchResults}
+          {#if searchResults || massSearchResults}
             <div class="flex flex-row gap-2">
               {#if results}
                 <Select items={leagues} bind:value={league} on:change={updateUrl} clearable={false} />
                 <Select items={platforms} bind:value={platform} on:change={updateUrl} clearable={false} />
-                <button
-                  class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40"
-                  on:click={() => openTrade(searchJewel, searchConqueror, searchResults.raw, platform.value, league.value)}
-                  disabled={!searchResults}>
-                  Trade
-                </button>
-                <button
-                  class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40"
-                  class:grouped={groupResults}
-                  on:click={() => (groupResults = !groupResults)}
-                  disabled={!searchResults}>
-                  Grouped
-                </button>
+                {#if searchResults}
+                  <button
+                    class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40"
+                    on:click={() => openTrade(searchJewel, searchConqueror, searchResults.raw, platform.value, league.value)}>
+                    Trade
+                  </button>
+                  <button
+                    class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40"
+                    class:grouped={groupResults}
+                    on:click={() => (groupResults = !groupResults)}>
+                    Grouped
+                  </button>
+                {/if}
               {/if}
               <button class="bg-neutral-100/20 px-4 p-1 rounded" on:click={() => (results = !results)}>
                 {results ? 'Config' : 'Results'}
@@ -686,15 +729,25 @@
                         Deselect
                       </button>
                     </div>
-                    <div class="flex flex-row mt-2">
+                    <div class="flex flex-row mt-2 space-x-2">
                       <button
-                        class="p-2 px-3 bg-green-500/40 rounded disabled:bg-green-900/40 flex-grow"
+                        class="p-2 px-3 bg-green-500/40 rounded disabled:bg-green-900/40 w-1/2"
                         on:click={() => search()}
-                        disabled={searching}>
-                        {#if searching}
-                          {currentSeed} / {data.TimelessJewelSeedRanges[selectedJewel.value].Max}
+                        disabled={searching || Object.keys(selectedStats).length === 0}>
+                        {#if searching && !massSearchResults && searchResults === undefined}
+                          {seedsProcessed} / {totalSeeds()}
                         {:else}
                           Search
+                        {/if}
+                      </button>
+                      <button
+                        class="p-2 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40 w-1/2"
+                        on:click={() => massSearch()}
+                        disabled={searching || Object.keys(selectedStats).length === 0}>
+                        {#if searching && !searchResults && massSearchResults === undefined}
+                          {seedsProcessed} / {totalSeeds()}
+                        {:else}
+                          Search All Sockets
                         {/if}
                       </button>
                     </div>
@@ -712,6 +765,28 @@
         {#if searchResults && results}
           <SearchResults {searchResults} {groupResults} {highlight} jewel={searchJewel} conqueror={searchConqueror} platform={platform.value} league={league.value} />
         {/if}
+
+        
+        {#if massSearchResults && results}
+          <div class="mt-4 flex flex-col overflow-auto">
+            {#each Object.keys(massSearchResults.resultsBySocket).flatMap(s => Object.keys(massSearchResults.resultsBySocket[s].grouped)).filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => parseInt(b) - parseInt(a)) as matchCount}
+              <div class="mt-4">
+                <h3 class="text-2xl font-bold mb-2 text-white">{matchCount} Matches</h3>
+                {#each Object.keys(massSearchResults.resultsBySocket) as socketId}
+                  {#if massSearchResults.resultsBySocket[socketId].grouped[matchCount] && massSearchResults.resultsBySocket[socketId].grouped[matchCount].length > 0}
+                    <div class="mt-2 border-t pt-2 border-white/20">
+                      <h4 class="text-xl font-bold text-orange-400 cursor-pointer mb-2" tabindex="0" role="button" on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); circledNode = parseInt(socketId); skillTreeComponent.centerOnNode(parseInt(socketId)); updateUrl(); } }} on:click={() => { circledNode = parseInt(socketId); skillTreeComponent.centerOnNode(parseInt(socketId)); updateUrl(); }}>
+                          {skillTree.nodes[parseInt(socketId)]?.name || 'Jewel Socket'} ({socketId})
+                      </h4>
+                      <SearchResults searchResults={{ grouped: { [matchCount]: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }, raw: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }} highlight={(seed, passives) => { circledNode = parseInt(socketId); highlight(seed, passives); skillTreeComponent.centerOnNode(parseInt(socketId)); }} groupResults={true} jewel={searchJewel} conqueror={searchConqueror} platform={platform.value} league={league.value} />
+                    </div>
+                  {/if}
+                {/each}
+              </div>
+            {/each}
+          </div>
+        {/if}
+
       </div>
     </div>
   {:else}

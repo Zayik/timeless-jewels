@@ -323,6 +323,16 @@ export interface ReverseSearchConfig {
   numWorkers?: number;
 }
 
+export interface MassReverseSearchConfig {
+  jewel: number;
+  conqueror: string;
+  socketToNodes: { [socketId: number]: number[] };
+  stats: StatConfig[];
+  minTotalWeight: number;
+  workerId?: number;
+  numWorkers?: number;
+}
+
 export interface SearchWithSeed {
   seed: number;
   weight: number;
@@ -336,6 +346,10 @@ export interface SearchWithSeed {
 export interface SearchResults {
   grouped: { [key: number]: SearchWithSeed[] };
   raw: SearchWithSeed[];
+}
+
+export interface MassSearchResults {
+  resultsBySocket: { [socketId: number]: SearchResults };
 }
 
 export const translateStat = (id: number, roll?: number | undefined): string => {
