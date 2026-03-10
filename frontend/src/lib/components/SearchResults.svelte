@@ -17,7 +17,11 @@
   let expandedGroup: string | number = '';
 </script>
 
-{#if groupResults}
+{#if searchResults.raw.length === 0}
+  <div class="mt-8 text-center text-lg text-neutral-300">
+    No results found.
+  </div>
+{:else if groupResults}
   <div class="flex flex-col overflow-auto">
     {#each Object.keys(searchResults.grouped)
       .map((x) => parseInt(x))

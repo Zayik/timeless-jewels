@@ -116,7 +116,7 @@ func ReverseSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelType data
 		for _, skill := range passiveSkills {
 			alternateTreeManager.PassiveSkill = skill
 			var result data.AlternatePassiveSkillInformation
-			
+
 			if cacheHit, ok := calculationCache[conqueror][timelessJewelType][realSeed][skill.Index]; ok {
 				result = cacheHit
 			} else {
