@@ -7,6 +7,13 @@ const config = {
       strict: false,
     }
   },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        api: 'modern-compiler'
+      }
+    }
+  },
   plugins: [sveltekit()],
   // TODO: Remove once vite 4.3 is out
   worker: {

@@ -12,6 +12,17 @@
 
 <div
   class="my-2 border-white/50 border p-2 flex flex-col cursor-pointer"
+  role="button"
+  tabindex="0"
+  on:keydown={(e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      highlight(
+        set.seed,
+        set.skills.map((s) => s.passive)
+      );
+    }
+  }}
   on:click={() =>
     highlight(
       set.seed,
