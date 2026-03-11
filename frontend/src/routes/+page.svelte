@@ -165,7 +165,21 @@
   let searching = false;
   let currentSeed = 0;
   let seedsProcessed = 0;
-  const totalSeeds = () => data.TimelessJewelSeedRanges[searchJewel || selectedJewel?.value || 0]?.Max - data.TimelessJewelSeedRanges[searchJewel || selectedJewel?.value || 0]?.Min || 0;
+  let activeSocketsCount = 1;
+
+  const totalSeeds = () => {
+    const jewelId = searchJewel || selectedJewel?.value || 0;
+    const range = data.TimelessJewelSeedRanges[jewelId];
+    if (!range) return 0;
+    
+    let count = (range.Max - range.Min) + 1;
+    if (range.Special) {
+      count = Math.floor((range.Max - range.Min) / 20) + 1;
+    }
+    
+    return count * activeSocketsCount;
+  };
+
   let searchResults: SearchResults;
   let searchJewel = 1;
   let searchConqueror = '';
@@ -179,6 +193,8 @@
     searching = true;
     searchResults = undefined;
     massSearchResults = undefined;
+    activeSocketsCount = 1;
+    seedsProcessed = 0;
 
     const query: ReverseSearchConfig = {
       jewel: selectedJewel.value,
@@ -195,7 +211,7 @@
     syncWrap
       .search(
         query,
-        proxy((s) => (currentSeed = s))
+        proxy((s) => { currentSeed = s; seedsProcessed += 100; })
       )
       .then((result) => {
         searchResults = result;
@@ -235,7 +251,8 @@
       minTotalWeight
     };
 
-    seedsProcessed = 0; syncWrap.massSearch(query, proxy((s) => { seedsProcessed += 100; })).then((result) => {
+    activeSocketsCount = Object.keys(socketToNodes).length;
+    seedsProcessed = 0; syncWrap.massSearch(query, proxy((s) => { seedsProcessed += (100 * activeSocketsCount); })).then((result) => {
       massSearchResults = result; console.log('MAIN THREAD massSearch result: ', JSON.stringify(result, null, 2));
       searching = false;
       results = true;
@@ -493,8 +510,18 @@
   const getLeagues = async () => {
     const response = await fetch('https://api.poe.watch/leagues');
     const responseJson = await response.json();
-    leagues = responseJson.map((l: { name: string }) => ({ value: l.name, label: l.name }));
-    league = leagues.find((l) => l.value === localStorage.getItem('league')) || leagues[0];
+    
+    // Sort leagues by start date descending so the newest leagues are first
+    const sortedLeagues = responseJson.sort((a: any, b: any) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
+    
+    leagues = sortedLeagues.map((l: { name: string }) => ({ value: l.name, label: l.name }));
+    
+    // The main active challenge league is the newest one that isn't HC, SSF, or Ruthless
+    let defaultLeague = leagues.find((l) => !l.value.includes('Ruthless') && !l.value.includes('Self-Found') && !l.value.includes('Hardcore') && !l.value.includes('Standard')) 
+                        || leagues.find(l => l.value === 'Standard') 
+                        || leagues[0];
+                        
+    league = leagues.find((l) => l.value === localStorage.getItem('league')) || defaultLeague;
   };
 
   $: league && localStorage.setItem('league', league.value);
@@ -735,7 +762,7 @@
                         on:click={() => search()}
                         disabled={searching || Object.keys(selectedStats).length === 0}>
                         {#if searching && !massSearchResults && searchResults === undefined}
-                          {seedsProcessed} / {totalSeeds()}
+                          {Math.min(seedsProcessed, totalSeeds())} / {totalSeeds()}
                         {:else}
                           Search
                         {/if}
@@ -745,7 +772,7 @@
                         on:click={() => massSearch()}
                         disabled={searching || Object.keys(selectedStats).length === 0}>
                         {#if searching && !searchResults && massSearchResults === undefined}
-                          {seedsProcessed} / {totalSeeds()}
+                          {Math.min(seedsProcessed, totalSeeds())} / {totalSeeds()}
                         {:else}
                           Search All Sockets
                         {/if}

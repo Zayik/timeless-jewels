@@ -412,7 +412,7 @@ export const constructQuery = (jewel: number, conqueror: string, result: SearchW
   let final_query = [];
 
   if (result.length === 0) {
-    return { query: { status: { option: 'online' }, stats: [] }, sort: { price: 'asc' } };
+    return { query: { status: { option: 'available' }, stats: [] }, sort: { price: 'asc' } };
   }
 
   // Generate chunks of up to 45 filters per "count" group
@@ -438,7 +438,7 @@ export const constructQuery = (jewel: number, conqueror: string, result: SearchW
   return {
     query: {
       status: {
-        option: 'online'
+        option: 'available'
       },
       stats: final_query
     },
