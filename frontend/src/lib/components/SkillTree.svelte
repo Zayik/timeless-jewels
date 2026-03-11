@@ -37,12 +37,12 @@
     offsetY = (window.innerHeight / 2) * scaling - pos.y;
   };
 
-  const slowTime = derived(t, (values) => {
-    if ((!highlighted || !highlighted.length) && !highlightJewels) {
+  const slowTime = derived(t, (timeVal: number) => {
+    if ((!highlighted || highlighted.length === 0) && !highlightJewels) {
       return 0;
     }
 
-    return Math.round(values / 40);
+    return Math.round(timeVal / 40);
   });
 
   const startGroups = [427, 320, 226, 227, 323, 422, 329];

@@ -169,7 +169,6 @@ func ReverseSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelType data
 	return results
 }
 
-
 func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewelType data.JewelType, conqueror data.Conqueror, workerID uint32, numWorkers uint32, updates UpdateFunc) map[uint32]map[uint32]map[uint32]map[uint32]int32 {
 	uniquePassives := make(map[uint32]*data.PassiveSkill)
 	passiveToSockets := make(map[uint32][]uint32)
@@ -270,7 +269,7 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 
 			if result.AlternatePassiveSkill != nil {
 				for i, key := range result.AlternatePassiveSkill.StatsKeys {
-					if _, ok := statMap[key]; ok  {
+					if _, ok := statMap[key]; ok {
 						for _, socketID := range passiveToSockets[skill.Index] {
 							if _, ok := results[socketID]; !ok {
 								results[socketID] = make(map[uint32]map[uint32]map[uint32]int32)
@@ -292,7 +291,7 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 			for _, augment := range result.AlternatePassiveAdditionInformations {
 				if augment.AlternatePassiveAddition != nil {
 					for i, key := range augment.AlternatePassiveAddition.StatsKeys {
-						if _, ok := statMap[key]; ok  {
+						if _, ok := statMap[key]; ok {
 							for _, socketID := range passiveToSockets[skill.Index] {
 								if _, ok := results[socketID]; !ok {
 									results[socketID] = make(map[uint32]map[uint32]map[uint32]int32)

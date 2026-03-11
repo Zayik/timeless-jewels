@@ -397,6 +397,11 @@ const tradeStatNames: { [key: number]: { [key: string]: string } } = {
     Victario: 'explicit.pseudo_timeless_jewel_victario',
     Chitus: 'explicit.pseudo_timeless_jewel_chitus',
     Caspiro: 'explicit.pseudo_timeless_jewel_caspiro'
+  },
+  6: {
+    Vorana: 'explicit.pseudo_timeless_jewel_vorana',
+    Medved: 'explicit.pseudo_timeless_jewel_medved',
+    Uhtred: 'explicit.pseudo_timeless_jewel_uhtred'
   }
 };
 
@@ -404,71 +409,31 @@ export const constructQuery = (jewel: number, conqueror: string, result: SearchW
   const max_filter_length = 45;
   const max_filters = 4;
   const max_query_length = max_filter_length * max_filters;
-  const final_query = [];
-  const stat = {
-    type: 'count',
-    value: { min: 1 },
-    filters: [],
-    disabled: false
-  };
+  let final_query = [];
 
-  // single seed case
-  if (result.length == 1) {
-    for (const conq of Object.keys(tradeStatNames[jewel])) {
-      stat.filters.push({
-        id: tradeStatNames[jewel][conq],
-        value: {
-          min: result[0].seed,
-          max: result[0].seed
-        },
-        disabled: conq != conqueror
-      });
-    }
+  if (result.length === 0) {
+    return { query: { status: { option: 'online' }, stats: [] }, sort: { price: 'asc' } };
+  }
 
-    final_query.push(stat);
-    // too many results case
-  } else if (result.length > max_query_length) {
-    for (let i = 0; i < max_filters; i++) {
-      final_query.push({
-        type: 'count',
-        value: { min: 1 },
-        filters: [],
-        disabled: i != 0
-      });
-    }
+  // Generate chunks of up to 45 filters per "count" group
+  const chunks = [];
+  for (let i = 0; i < result.length && chunks.length < max_filters; i += max_filter_length) {
+    chunks.push(result.slice(i, i + max_filter_length));
+  }
 
-    for (const [i, r] of result.slice(0, max_query_length).entries()) {
-      const index = Math.floor(i / max_filter_length);
-
-      final_query[index].filters.push({
+  final_query = chunks.map((chunk) => {
+    return {
+      type: 'count',
+      value: { min: 1 },
+      filters: chunk.map(r => ({
         id: tradeStatNames[jewel][conqueror],
         value: {
           min: r.seed,
           max: r.seed
         }
-      });
-    }
-  } else {
-    for (const conq of Object.keys(tradeStatNames[jewel])) {
-      stat.disabled = conq != conqueror;
-
-      for (const r of result) {
-        stat.filters.push({
-          id: tradeStatNames[jewel][conq],
-          value: {
-            min: r.seed,
-            max: r.seed
-          }
-        });
-      }
-
-      if (stat.filters.length > max_filter_length) {
-        stat.filters = stat.filters.slice(0, max_filter_length);
-      }
-
-      final_query.push(stat);
-    }
-  }
+      }))
+    };
+  });
 
   return {
     query: {
@@ -499,7 +464,7 @@ export const openTrade = (
   }
 
   const url = new URL(
-    `https://www.pathofexile.com/trade/search${platform === 'PC' ? '' : `/${platform.toLowerCase()}`}/${league}`
+    `https://www.pathofexile.com/trade/search/${league}`
   );
   url.searchParams.set('q', JSON.stringify(constructQuery(jewel, conqueror, results)));
 
