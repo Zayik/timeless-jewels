@@ -12,6 +12,7 @@ func Expose() *crystalline.Exposer {
 	e.ExposeFuncOrPanic(calculator.Calculate)
 	e.ExposeFuncOrPanic(calculator.ReverseSearch)
 	e.ExposeFuncOrPanic(calculator.MassReverseSearch)
+	e.ExposeFuncOrPanic(calculator.ClearCache)
 	e.ExposeFuncOrPanic(data.GetStatByIndex)
 	e.ExposeFuncOrPanic(data.GetAlternatePassiveSkillByIndex)
 	e.ExposeFuncOrPanic(data.GetAlternatePassiveAdditionByIndex)

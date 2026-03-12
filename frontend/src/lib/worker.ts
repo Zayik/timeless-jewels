@@ -54,14 +54,26 @@ export const syncWrap = browser ? {
     }
 
     // Sort grouped lists
+    const maxLen = Math.max(0, ...Object.keys(searchGrouped).map(x => parseInt(x) || 0));
+
     Object.keys(searchGrouped).forEach((key) => {
       const numKey = parseInt(key);
       searchGrouped[numKey] = searchGrouped[numKey].sort((a, b) => b.weight - a.weight);
+      
+      let limit = 100;
+      if (maxLen - numKey >= 3) limit = 0;
+      else if (maxLen - numKey === 2) limit = 5;
+      else if (maxLen - numKey === 1) limit = 20;
+
+      if (limit === 0) {
+        delete searchGrouped[numKey];
+      } else {
+        searchGrouped[numKey] = searchGrouped[numKey].slice(0, limit);
+      }
     });
 
     // Merge and sort raw results
-    const raw = results
-      .map(r => r.raw)
+    const raw = Object.values(searchGrouped)
       .flat()
       .sort((a, b) => b.weight - a.weight);
 
@@ -106,9 +118,22 @@ export const syncWrap = browser ? {
     // Sort grouped lists and construct raw lists for each socket
     for (const socketIdStr in massResults) {
       const socketId = parseInt(socketIdStr);
+      const maxLen = Math.max(0, ...Object.keys(massResults[socketId].grouped).map(x => parseInt(x) || 0));
+
       Object.keys(massResults[socketId].grouped).forEach((key) => {
         const numKey = parseInt(key);
         massResults[socketId].grouped[numKey] = massResults[socketId].grouped[numKey].sort((a, b) => b.weight - a.weight);
+        
+        let limit = 100;
+        if (maxLen - numKey >= 3) limit = 0;
+        else if (maxLen - numKey === 2) limit = 5;
+        else if (maxLen - numKey === 1) limit = 20;
+
+        if (limit === 0) {
+          delete massResults[socketId].grouped[numKey];
+        } else {
+          massResults[socketId].grouped[numKey] = massResults[socketId].grouped[numKey].slice(0, limit);
+        }
       });
       
       massResults[socketId].raw = Object.values(massResults[socketId].grouped)

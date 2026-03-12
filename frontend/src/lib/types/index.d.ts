@@ -1,6 +1,7 @@
 /* eslint-disable */
 export declare namespace calculator {
   function Calculate(passiveID: number, seed: number, timelessJewelType: number, conqueror: string): data.AlternatePassiveSkillInformation;
+  function ClearCache(): void;
   function MassReverseSearch(scion?: Record<number, Array<number> | undefined>, statIDs?: Array<number>, timelessJewelType: number, conqueror: string, workerID: number, numWorkers: number, updates: (arg1: number) => Promise<void>): Promise<(Record<number, Record<number, Record<number, Record<number, number> | undefined> | undefined> | undefined> | undefined)>;
   function ReverseSearch(passiveIDs?: Array<number>, statIDs?: Array<number>, timelessJewelType: number, conqueror: string, workerID: number, numWorkers: number, updates: (arg1: number) => Promise<void>): Promise<(Record<number, Record<number, Record<number, number> | undefined> | undefined> | undefined)>;
 }

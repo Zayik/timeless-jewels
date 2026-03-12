@@ -45,44 +45,55 @@ const obj = {
 
         return {
           passive: passiveToTree[skillID],
-          stats: searchResult[seed][skillID]
+          stats: searchResult[seed][skillID] as { [key: string]: number }
         };
       });
 
-      const len = Object.keys(searchResult[seed]).length;
-      searchGrouped[len] = [
-        ...(searchGrouped[len] || []),
-        {
-          skills: skills,
-          seed,
-          weight,
-          statCounts
+      if (weight < args.minTotalWeight) {
+        delete searchResult[seedStr];
+        return;
+      }
+
+      for (const stat of args.stats) {
+        if ((statCounts[stat.id] === undefined && stat.min > 0) || statCounts[stat.id] < stat.min) {
+          delete searchResult[seedStr];
+          return;
         }
-      ];
+      }
+
+      const len = Object.keys(searchResult[seed]).length;
+      if (!searchGrouped[len]) {
+        searchGrouped[len] = [];
+      }
+      searchGrouped[len].push({
+        skills: skills,
+        seed,
+        weight,
+        statCounts
+      });
+      
+      delete searchResult[seedStr];
     });
+
+    const maxLen = Math.max(0, ...Object.keys(searchGrouped).map(x => parseInt(x) || 0));
 
     Object.keys(searchGrouped).forEach((len) => {
       const nLen = parseInt(len);
-      searchGrouped[nLen] = searchGrouped[nLen].filter((g) => {
-        if (g.weight < args.minTotalWeight) {
-          return false;
-        }
+      searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
+      
+      let limit = 100;
+      if (maxLen - nLen >= 3) limit = 0;
+      else if (maxLen - nLen === 2) limit = 5;
+      else if (maxLen - nLen === 1) limit = 20;
 
-        for (const stat of args.stats) {
-          if ((g.statCounts[stat.id] === undefined && stat.min > 0) || g.statCounts[stat.id] < stat.min) {
-            return false;
-          }
-        }
-
-        return true;
-      });
-
-      if (Object.keys(searchGrouped[nLen]).length == 0) {
+      if (limit === 0) {
         delete searchGrouped[nLen];
       } else {
-        searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
+        searchGrouped[nLen] = searchGrouped[nLen].slice(0, limit);
       }
     });
+
+    calculator.ClearCache();
 
     return {
       grouped: searchGrouped,
@@ -129,42 +140,51 @@ const obj = {
 
           return {
             passive: passiveToTree[skillID],
-            stats: socketSearchResult[seed]![skillID]!
+            stats: socketSearchResult[seed]![skillID]! as { [key: string]: number }
           };
         });
 
-        const len = Object.keys(socketSearchResult[seed]!).length;
-        searchGrouped[len] = [
-          ...(searchGrouped[len] || []),
-          {
-            skills: skills,
-            seed,
-            weight,
-            statCounts
+        if (weight < args.minTotalWeight) {
+          delete socketSearchResult[seedStr];
+          return;
+        }
+
+        for (const stat of args.stats) {
+          if ((statCounts[stat.id] === undefined && stat.min > 0) || statCounts[stat.id] < stat.min) {
+            delete socketSearchResult[seedStr];
+            return;
           }
-        ];
+        }
+
+        const len = Object.keys(socketSearchResult[seed]!).length;
+        if (!searchGrouped[len]) {
+          searchGrouped[len] = [];
+        }
+        searchGrouped[len].push({
+          skills: skills,
+          seed,
+          weight,
+          statCounts
+        });
+
+        delete socketSearchResult[seedStr];
       });
+
+      const maxLen = Math.max(0, ...Object.keys(searchGrouped).map(x => parseInt(x) || 0));
 
       Object.keys(searchGrouped).forEach((len) => {
         const nLen = parseInt(len);
-        searchGrouped[nLen] = searchGrouped[nLen].filter((g) => {
-          if (g.weight < args.minTotalWeight) {
-            return false;
-          }
+        searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
+        
+        let limit = 100;
+        if (maxLen - nLen >= 3) limit = 0;
+        else if (maxLen - nLen === 2) limit = 5;
+        else if (maxLen - nLen === 1) limit = 20;
 
-          for (const stat of args.stats) {
-            if ((g.statCounts[stat.id] === undefined && stat.min > 0) || g.statCounts[stat.id] < stat.min) {
-              return false;
-            }
-          }
-
-          return true;
-        });
-
-        if (Object.keys(searchGrouped[nLen]).length == 0) {
+        if (limit === 0) {
           delete searchGrouped[nLen];
         } else {
-          searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
+          searchGrouped[nLen] = searchGrouped[nLen].slice(0, limit);
         }
       });
 
@@ -176,7 +196,7 @@ const obj = {
           .sort((a, b) => b.weight - a.weight)
       };
     }
-
+    calculator.ClearCache();
     return { resultsBySocket: massResults };
   }
 } as const;
