@@ -1,0 +1,42 @@
+                      <div class="flex flex-col mt-4 p-2 bg-gray-800/50 rounded ring-1 ring-gray-600">
+                        <div class="flex flex-row justify-between items-center mb-2">
+                          <span class="font-bold text-orange-400">Market Search</span>
+                          <button class="text-sm underline text-gray-300 hover:text-white" on:click={() => showMarketSettings = !showMarketSettings}>
+                            Settings & Sync
+                          </button>
+                        </div>
+                        
+                        {#if showMarketSettings}
+                          <div class="flex flex-col mb-3 p-2 bg-gray-900 rounded space-y-2 text-sm">
+                            <label class="flex flex-col">
+                              <span>POESESSID (Optional, required for unproxied sync):</span>
+                              <input type="password" bind:value={poeSessId} class="bg-gray-700 rounded p-1 text-white" placeholder="Enter session id..."/>
+                            </label>
+                            <p class="text-xs text-gray-400">If you get 403 errors, install an Allow CORS browser extension.</p>
+                            <button
+                              class="p-1 px-2 bg-orange-600/60 rounded hover:bg-orange-600 disabled:bg-gray-600"
+                              on:click={syncMarket} disabled={fetchingMarket}>
+                              {fetchingMarket ? 'Syncing...' : 'Sync Market Cache'}
+                            </button>
+                            {#if marketProgress}
+                              <div class="text-xs text-blue-300">{marketProgress}</div>
+                            {/if}
+                          </div>
+                        {/if}
+
+                        <div class="text-xs text-gray-300 mb-2">
+                          Cached: {cachedJewels.length} jewels 
+                          {#if cacheTime} (Updated: {cacheTime.toLocaleTimeString()}){/if}
+                        </div>
+
+                        <button
+                          class="p-2 px-3 bg-orange-500/40 rounded disabled:bg-orange-900/40 w-full font-bold"
+                          on:click={() => marketSearchAllSockets()}
+                          disabled={searching || Object.keys(selectedStats).length === 0 || cachedJewels.length === 0}>
+                          {#if searching && !searchResults && massSearchResults === undefined}
+                            {seedsProcessed} / {cachedJewels.length}
+                          {:else}
+                            Search Market Jewels (All Sockets)
+                          {/if}
+                        </button>
+                      </div>

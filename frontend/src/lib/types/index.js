@@ -8,6 +8,8 @@ export const initializeCrystalline = () => {
     ClearCache: globalThis["go"]["timeless-jewels"]["calculator"]["ClearCache"],
     MassReverseSearch: globalThis["go"]["timeless-jewels"]["calculator"]["MassReverseSearch"],
     ReverseSearch: globalThis["go"]["timeless-jewels"]["calculator"]["ReverseSearch"],
+    TargetedMarketSearch: globalThis["go"]["timeless-jewels"]["calculator"]["TargetedMarketSearch"],
+    TargetedMassMarketSearch: globalThis["go"]["timeless-jewels"]["calculator"]["TargetedMassMarketSearch"],
   }
   data = {
     GetAlternatePassiveAdditionByIndex: globalThis["go"]["timeless-jewels"]["data"]["GetAlternatePassiveAdditionByIndex"],

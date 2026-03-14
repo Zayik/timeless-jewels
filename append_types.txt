@@ -1,0 +1,8 @@
+export interface TargetedMassMarketSearchConfig {
+  jewel: number;
+  seeds: number[];
+  conquerors: string[];
+  socketToNodes: { [socketId: number]: number[] };
+  stats: StatConfig[];
+  minTotalWeight: number;
+}

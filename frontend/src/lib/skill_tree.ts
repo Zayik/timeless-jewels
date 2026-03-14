@@ -335,6 +335,8 @@ export interface MassReverseSearchConfig {
 
 export interface SearchWithSeed {
   seed: number;
+  conqueror?: string;
+  price?: string;
   weight: number;
   statCounts: Record<number, number>;
   skills: {
@@ -425,7 +427,7 @@ export const constructQuery = (jewel: number, conqueror: string, result: SearchW
     return {
       type: 'count',
       value: { min: 1 },
-      filters: chunk.map(r => ({
+      filters: chunk.map((r) => ({
         id: tradeStatNames[jewel][conqueror],
         value: {
           min: r.seed,
@@ -463,12 +465,20 @@ export const openTrade = (
     league = 'Standard';
   }
 
-  const url = new URL(
-    `https://www.pathofexile.com/trade/search/${league}`
-  );
+  const url = new URL(`https://www.pathofexile.com/trade/search/${league}`);
   url.searchParams.set('q', JSON.stringify(constructQuery(jewel, conqueror, results)));
 
   console.log('opening trade', url);
 
   window.open(url, '_blank');
 };
+
+export interface TargetedMassMarketSearchConfig {
+  jewel: number;
+  seeds: number[];
+  conquerors: string[];
+  prices?: string[];
+  socketToNodes: { [socketId: number]: number[] };
+  stats: StatConfig[];
+  minTotalWeight: number;
+}

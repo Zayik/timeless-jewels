@@ -531,6 +531,201 @@
   onMount(() => {  
     getLeagues();
   });
+  import { fetchMarketJewels, pruneStaleMarketJewels } from '$lib/trade_api';
+  import { getCachedJewels, getCacheTime, setCachedJewels, clearCachedJewels } from '$lib/market_cache';
+  import type { MarketJewel } from '$lib/market_cache';
+
+  // Market state
+  let poeSessId = '';
+  let showSessionHelp = false;
+  let showMarketSettings = false;
+  let showMarketPanel = localStorage.getItem('showMarketPanel') !== 'false';
+  $: localStorage.setItem('showMarketPanel', showMarketPanel ? 'true' : 'false');
+  let fetchingMarket = false;
+  let marketProgress = '';
+  let cachedJewels: MarketJewel[] = [];
+  let cacheTime: Date | null = null;
+  let marketConquerorFilter = 'All';
+  let marketSort: 'price' | 'seed' | 'date' = 'price';
+
+  const CURRENCY_TIER: Record<string, number> = { divine: 1000, div: 1000, exalted: 100, ex: 100, chaos: 1 };
+  const parsePrice = (price: string): number => {
+    const parts = price.trim().split(' ');
+    const amount = parseFloat(parts[0]) || 0;
+    const currency = parts.slice(1).join(' ').toLowerCase().replace('orb of ', '').trim();
+    return amount * (CURRENCY_TIER[currency] ?? 0.01);
+  };
+  const comparePrices = (a: MarketJewel, b: MarketJewel) => parsePrice(a.price) - parsePrice(b.price);
+
+  $: filteredMarketJewels = cachedJewels
+    .filter(j => marketConquerorFilter === 'All' || j.worshipper.toLowerCase() === marketConquerorFilter.toLowerCase())
+    .sort((a, b) =>
+      marketSort === 'seed' ? a.seed - b.seed :
+      marketSort === 'date' ? new Date(b.listedAt).getTime() - new Date(a.listedAt).getTime() :
+      comparePrices(a, b)
+    );
+  
+  onMount(() => {
+    poeSessId = localStorage.getItem('poesessid') || '';
+  });
+
+  $: if (poeSessId) localStorage.setItem('poesessid', poeSessId);
+
+  $: if (selectedJewel && league) {
+     cachedJewels = getCachedJewels(selectedJewel.value, league.value);
+     cacheTime = getCacheTime(selectedJewel.value, league.value);
+  }
+
+    const syncMarket = async () => {
+    if (!selectedJewel) return;
+    fetchingMarket = true;
+    try {
+      const lastSyncStr = cacheTime ? cacheTime.toISOString() : undefined;
+      await fetchMarketJewels(
+        selectedJewel.value,
+        league?.value || 'Standard',
+        poeSessId,
+        (msg) => (marketProgress = msg),
+        (chunk) => {
+          const jewelMap = new Map();
+          for (const j of cachedJewels) {
+            if (j.id) jewelMap.set(j.id, j);
+            else jewelMap.set(`${j.seed}_${j.worshipper}`, j);
+          }
+          for (const j of chunk) {
+            if (j.id) jewelMap.set(j.id, j);
+            else jewelMap.set(`${j.seed}_${j.worshipper}`, j);
+          }
+          const merged = Array.from(jewelMap.values());
+          setCachedJewels(selectedJewel.value, league?.value || 'Standard', merged);
+          cachedJewels = merged;
+        },
+        lastSyncStr
+      );
+      cacheTime = getCacheTime(selectedJewel.value, league?.value || 'Standard');
+    } catch (e: any) {
+      alert(e.message || 'Failed to sync');
+    } finally {
+      fetchingMarket = false;
+      marketProgress = '';
+    }
+  };
+
+  const clearMarketCache = () => {
+    if (!selectedJewel) return;
+    if (!confirm(`Clear all cached market data for ${selectedJewel.label} (${league?.value || 'Standard'})?`)) return;
+    clearCachedJewels(selectedJewel.value, league?.value || 'Standard');
+    cachedJewels = [];
+    cacheTime = null;
+  };
+
+  const pruneMarketCache = async () => {
+    if (!selectedJewel || cachedJewels.length === 0) return;
+    fetchingMarket = true;
+    try {
+      const pruned = await pruneStaleMarketJewels(
+        selectedJewel.value,
+        league?.value || 'Standard',
+        poeSessId,
+        cachedJewels,
+        (msg) => (marketProgress = msg)
+      );
+      setCachedJewels(selectedJewel.value, league?.value || 'Standard', pruned);
+      cachedJewels = pruned;
+      cacheTime = getCacheTime(selectedJewel.value, league?.value || 'Standard');
+    } catch (e: any) {
+      alert(e.message || 'Failed to prune cache');
+    } finally {
+      fetchingMarket = false;
+      marketProgress = '';
+    }
+  };
+
+  const marketSearchAllSockets = async () => {
+    if (!selectedJewel) return;
+    if (filteredMarketJewels.length === 0) {
+      alert('No jewels in market cache for the selected conqueror filter.');
+      return;
+    }
+
+    searchJewel = selectedJewel.value;
+    searching = true;
+    massSearchResults = undefined;
+    searchResults = undefined;
+    seedsProcessed = 0;
+
+    const allSockets = Object.keys(skillTree.nodes)
+      .map(k => parseInt(k))
+      .filter(k => skillTree.nodes[k]?.isJewelSocket);
+    const reqNodes: { [key: number]: number[] } = {};
+    allSockets.forEach(socketId => {
+      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter(n => n && !n.isJewelSocket && !n.isMastery);
+      reqNodes[socketId] = affected.map(n => data.TreeToPassive[n.skill]).filter(Boolean).map(n => n.Index);
+    });
+    activeSocketsCount = allSockets.length;
+
+    const seeds = filteredMarketJewels.map(j => j.seed);
+    const conquerors = filteredMarketJewels.map(j => j.worshipper);
+    const prices = filteredMarketJewels.map(j => j.price);
+
+    seedsProcessed = 0;
+
+    const res = await syncWrap.targetedMassSearch(
+      {
+        jewel: selectedJewel.value,
+        seeds,
+        conquerors,
+        prices,
+        socketToNodes: reqNodes,
+        stats: Object.values(selectedStats).filter((s) => s.weight > 0),
+        minTotalWeight
+      },
+      proxy(async () => { seedsProcessed++; })
+    );
+
+    massSearchResults = res;
+    searching = false;
+    results = true;
+  };
+
+  const marketSearchCurrentSocket = async () => {
+    if (!selectedJewel || !circledNode) return;
+    if (filteredMarketJewels.length === 0) {
+      alert('No jewels in market cache for the selected conqueror filter.');
+      return;
+    }
+
+    searching = true;
+    massSearchResults = undefined;
+    searchResults = undefined;
+    seedsProcessed = 0;
+
+    const socketToNodes = {
+      [circledNode]: affectedNodes
+        .filter(n => !disabled.has(n.skill))
+        .map(n => data.TreeToPassive[n.skill])
+        .filter(Boolean)
+        .map(n => n.Index)
+    };
+
+    const res = await syncWrap.targetedMassSearch(
+      {
+        jewel: selectedJewel.value,
+        seeds: filteredMarketJewels.map(j => j.seed),
+        conquerors: filteredMarketJewels.map(j => j.worshipper),
+        prices: filteredMarketJewels.map(j => j.price),
+        socketToNodes,
+        stats: Object.values(selectedStats).filter(s => s.weight > 0),
+        minTotalWeight
+      },
+      proxy(async () => { seedsProcessed++; })
+    );
+
+    massSearchResults = res;
+    searching = false;
+    results = true;
+  };
+
 </script>
 
 <svelte:window on:paste={onPaste} />
@@ -595,6 +790,124 @@
           <Select items={jewels} bind:value={selectedJewel} on:change={changeJewel} />
 
           {#if selectedJewel}
+            <!-- ── Market Panel ─────────────────────────────────────── -->
+            <div class="mt-4 rounded ring-1 ring-gray-600 bg-gray-800/50">
+              <button
+                class="w-full flex flex-row justify-between items-center p-2 px-3 text-left"
+                on:click={() => (showMarketPanel = !showMarketPanel)}>
+                <span class="font-bold text-orange-400 text-sm">Market</span>
+                <span class="text-xs text-gray-400">{showMarketPanel ? '▲' : '▼'} {cachedJewels.length} jewels{cacheTime ? ' · ' + cacheTime.toLocaleTimeString() : ''}</span>
+              </button>
+
+              {#if showMarketPanel}
+                <div class="p-2 pt-0 flex flex-col space-y-2 text-sm">
+                  <!-- Settings (collapsible) -->
+                  <div class="border-t border-gray-700 pt-2">
+                    <button class="text-xs text-gray-400 hover:text-white underline mb-2" on:click={() => (showMarketSettings = !showMarketSettings)}>
+                      {showMarketSettings ? '▲' : '▼'} Settings
+                    </button>
+                    {#if showMarketSettings}
+                      <div class="flex flex-col space-y-2 bg-gray-900 rounded p-2">
+                        <Select items={leagues} bind:value={league} clearable={false} />
+                        <label class="flex flex-col">
+                          <span class="text-xs text-gray-400 mb-1">POESESSID (optional) <button type="button" class="ml-1 text-blue-400 hover:text-blue-300 underline" on:click={() => (showSessionHelp = !showSessionHelp)}>(?)</button></span>
+                          <input type="password" autocomplete="new-password" bind:value={poeSessId} class="bg-gray-700 rounded p-1 text-white text-xs" placeholder="Enter session id..." />
+                        </label>
+                        {#if showSessionHelp}
+                          <div class="bg-gray-800 border border-gray-600 p-2 rounded text-xs text-gray-300">
+                            <p class="font-bold mb-1 text-white">How to get your POESESSID:</p>
+                            <ol class="list-decimal list-inside space-y-1 ml-1">
+                              <li>Go to <a href="https://www.pathofexile.com/trade" target="_blank" class="text-blue-400 hover:underline">pathofexile.com/trade</a> and log in.</li>
+                              <li>Press <strong>F12</strong> to open Developer Tools.</li>
+                              <li>Go to <strong>Application</strong> tab → Cookies → pathofexile.com.</li>
+                              <li>Find <strong>POESESSID</strong>, copy its value, paste here.</li>
+                            </ol>
+                            <p class="mt-2 text-orange-400 font-bold">Never share this ID with anyone!</p>
+                          </div>
+                        {/if}
+                        <div class="flex flex-row space-x-2">
+                          <button
+                            class="p-1 w-full bg-orange-600/60 rounded hover:bg-orange-600 disabled:bg-gray-600 font-bold text-xs"
+                            on:click={syncMarket} disabled={fetchingMarket}
+                            title="Fetches newly listed items; full fetch if cache missing or older than 7 days">
+                            {fetchingMarket ? 'Syncing...' : 'Sync'}
+                          </button>
+                          <button
+                            class="p-1 w-full bg-yellow-700/60 rounded hover:bg-yellow-700 disabled:bg-gray-600 font-bold text-xs"
+                            on:click={pruneMarketCache} disabled={fetchingMarket || cachedJewels.length === 0}
+                            title="Remove sold/delisted listings from cache">
+                            {fetchingMarket ? 'Pruning...' : 'Prune Sold'}
+                          </button>
+                        </div>
+                        <button
+                          class="text-xs text-red-400 hover:text-red-300 underline self-end disabled:text-gray-600"
+                          on:click={clearMarketCache} disabled={fetchingMarket || cachedJewels.length === 0}>
+                          Clear cache
+                        </button>
+                      </div>
+                    {/if}
+                    {#if marketProgress}
+                      <div class="text-xs text-blue-300 mt-1 text-center">{marketProgress}</div>
+                    {/if}
+                  </div>
+
+                  <!-- Filter + Sort -->
+                  <div class="flex flex-row space-x-2 items-center">
+                    <select bind:value={marketConquerorFilter} class="bg-gray-700 rounded p-1 text-xs text-white flex-1">
+                      <option value="All">All conquerors</option>
+                      {#each Object.keys(data.TimelessJewelConquerors[selectedJewel.value]) as conq}
+                        <option value={conq}>{conq}</option>
+                      {/each}
+                    </select>
+                    <select bind:value={marketSort} class="bg-gray-700 rounded p-1 text-xs text-white flex-1">
+                      <option value="price">Price ↑</option>
+                      <option value="seed">Seed ↑</option>
+                      <option value="date">Newest first</option>
+                    </select>
+                  </div>
+
+                  <!-- Seed list -->
+                  {#if filteredMarketJewels.length > 0}
+                    <div class="overflow-auto max-h-48 rounded border border-gray-700">
+                      <table class="w-full text-xs">
+                        <thead class="sticky top-0 bg-gray-900 text-gray-400">
+                          <tr>
+                            <th class="text-left p-1 pl-2">Seed</th>
+                            <th class="text-left p-1">Conqueror</th>
+                            <th class="text-left p-1">Price</th>
+                            <th class="p-1"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {#each filteredMarketJewels as j}
+                            <tr
+                              class="border-t border-gray-700/50 hover:bg-gray-700/40 cursor-pointer"
+                              on:click={() => {
+                                seed = j.seed;
+                                selectedConqueror = { value: j.worshipper, label: j.worshipper };
+                                mode = 'seed';
+                                updateUrl();
+                              }}>
+                              <td class="p-1 pl-2 font-mono">{j.seed}</td>
+                              <td class="p-1 text-gray-300">{j.worshipper}</td>
+                              <td class="p-1 text-yellow-300">{j.price || '—'}</td>
+                              <td class="p-1 text-gray-500">→</td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  {:else}
+                    <div class="text-xs text-gray-500 text-center py-2">
+                      {cachedJewels.length === 0 ? 'No cached jewels. Click Sync to fetch.' : 'No jewels match the current filter.'}
+                    </div>
+                  {/if}
+
+                </div>
+              {/if}
+            </div>
+            <!-- ── End Market Panel ─────────────────────────────────── -->
+
             <div class="mt-4">
               <h3 class="mb-2">Conqueror</h3>
               <Select items={conquerors} bind:value={selectedConqueror} on:change={updateUrl} />
@@ -778,6 +1091,32 @@
                         {/if}
                       </button>
                     </div>
+                    {#if cachedJewels.length > 0}
+                      <div class="flex flex-row mt-2 space-x-2">
+                        <button
+                          class="p-2 px-3 bg-orange-500/40 rounded disabled:bg-orange-900/40 w-1/2"
+                          on:click={marketSearchCurrentSocket}
+                          disabled={searching || Object.keys(selectedStats).length === 0 || filteredMarketJewels.length === 0 || !circledNode}
+                          title="Search market seeds against the currently selected jewel socket">
+                          {#if searching && massSearchResults === undefined && searchResults === undefined}
+                            {seedsProcessed} / {filteredMarketJewels.length}
+                          {:else}
+                            Market: This Socket
+                          {/if}
+                        </button>
+                        <button
+                          class="p-2 px-3 bg-orange-600/40 rounded disabled:bg-orange-900/40 w-1/2"
+                          on:click={marketSearchAllSockets}
+                          disabled={searching || Object.keys(selectedStats).length === 0 || filteredMarketJewels.length === 0}
+                          title="Search market seeds against all jewel sockets">
+                          {#if searching && massSearchResults === undefined && searchResults === undefined}
+                            {seedsProcessed} / {filteredMarketJewels.length}
+                          {:else}
+                            Market: All Sockets
+                          {/if}
+                        </button>
+                      </div>
+                    {/if}
                   </div>
                 {/if}
               {/if}

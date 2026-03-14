@@ -31,10 +31,15 @@
   <div class="flex flex-row justify-between">
     <!-- Padding -->
     <button class="px-3 invisible">Trade</button>
-    <div class="font-bold text-orange-500 text-center">
-      Seed {set.seed} (weight {set.weight})
+    <div class="font-bold text-orange-500 text-center flex flex-col items-center">
+      <span>Seed {set.seed} (weight {set.weight})</span>
+      {#if set.conqueror}
+        <span class="text-sm text-gray-400 font-normal">
+          {set.conqueror} {#if set.price}- {set.price}{/if}
+        </span>
+      {/if}
     </div>
-    <button class="px-3 bg-blue-500/40 rounded" on:click={() => openTrade(jewel, conqueror, [set], platform, league)}>Trade</button>
+    <button class="px-3 bg-blue-500/40 rounded self-start" on:click={() => openTrade(jewel, set.conqueror || conqueror, [set], platform, league)}>Trade</button>
   </div>
   {#each set.skills as skill}
     <div class="mt-2">

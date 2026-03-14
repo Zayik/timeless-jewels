@@ -280,5 +280,210 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 	return results
 }
 
+func TargetedMarketSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelType data.JewelType, seeds []uint32, conquerors []data.Conqueror, updates UpdateFunc) map[uint32]map[uint32]map[uint32]int32 {
+	passiveSkills := make(map[uint32]*data.PassiveSkill)
+	for _, id := range passiveIDs {
+		skill := data.GetPassiveSkillByIndex(id)
+		if data.IsPassiveSkillValidForAlteration(skill) {
+			passiveSkills[id] = skill
+		}
+	}
+
+	alternateTreeVersion := data.GetAlternateTreeVersionIndex(uint32(timelessJewelType))
+
+	statMap := make(map[uint32]bool)
+	for _, id := range statIDs {
+		statMap[id] = true
+	}
+
+	results := make(map[uint32]map[uint32]map[uint32]int32)
+
+	rng := random.NewRNG()
+	alternateTreeManager := AlternateTreeManager{}
+
+	for i, seed := range seeds {
+		conqueror := conquerors[i]
+
+		realSeed := seed
+		if data.TimelessJewelSeedRanges[timelessJewelType].Special {
+			realSeed *= 20
+		}
+
+		if i%100 == 0 && updates != nil {
+			updates(realSeed)
+		}
+
+		timelessJewelConqueror := data.TimelessJewelConquerors[timelessJewelType][conqueror]
+		timelessJewel := data.TimelessJewel{
+			AlternateTreeVersion:   alternateTreeVersion,
+			TimelessJewelConqueror: timelessJewelConqueror,
+			Seed:                   realSeed,
+		}
+
+		alternateTreeManager.TimelessJewel = timelessJewel
+
+		for _, skill := range passiveSkills {
+			alternateTreeManager.PassiveSkill = skill
+			var result data.AlternatePassiveSkillInformation
+
+			if alternateTreeManager.IsPassiveSkillReplaced(rng) {
+				result = alternateTreeManager.ReplacePassiveSkill(rng)
+			} else {
+				result = data.AlternatePassiveSkillInformation{
+					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(rng),
+				}
+			}
+
+			if result.AlternatePassiveSkill != nil {
+				for j, key := range result.AlternatePassiveSkill.StatsKeys {
+					if _, ok := statMap[key]; ok {
+						if _, ok := results[realSeed]; !ok {
+							results[realSeed] = make(map[uint32]map[uint32]int32)
+						}
+						if _, ok := results[realSeed][skill.Index]; !ok {
+							results[realSeed][skill.Index] = make(map[uint32]int32)
+						}
+						if result.StatRolls != nil {
+							results[realSeed][skill.Index][key] = result.StatRolls[uint32(j)]
+						}
+					}
+				}
+			}
+
+			for _, augment := range result.AlternatePassiveAdditionInformations {
+				if augment.AlternatePassiveAddition != nil {
+					for j, key := range augment.AlternatePassiveAddition.StatsKeys {
+						if _, ok := statMap[key]; ok {
+							if _, ok := results[realSeed]; !ok {
+								results[realSeed] = make(map[uint32]map[uint32]int32)
+							}
+							if _, ok := results[realSeed][skill.Index]; !ok {
+								results[realSeed][skill.Index] = make(map[uint32]int32)
+							}
+							if augment.StatRolls != nil {
+								results[realSeed][skill.Index][key] = augment.StatRolls[uint32(j)]
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return results
+}
+
+func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewelType data.JewelType, seeds []uint32, conquerors []data.Conqueror, updates UpdateFunc) map[uint32]map[uint32]map[uint32]map[uint32]int32 {
+	uniquePassives := make(map[uint32]*data.PassiveSkill)
+	passiveToSockets := make(map[uint32][]uint32)
+
+	for socketID, passives := range scion {
+		for _, id := range passives {
+			if _, ok := uniquePassives[id]; !ok {
+				skill := data.GetPassiveSkillByIndex(id)
+				if data.IsPassiveSkillValidForAlteration(skill) {
+					uniquePassives[id] = skill
+				}
+			}
+			if data.IsPassiveSkillValidForAlteration(uniquePassives[id]) {
+				passiveToSockets[id] = append(passiveToSockets[id], socketID)
+			}
+		}
+	}
+
+	alternateTreeVersion := data.GetAlternateTreeVersionIndex(uint32(timelessJewelType))
+
+	statMap := make(map[uint32]bool)
+	for _, id := range statIDs {
+		statMap[id] = true
+	}
+
+	results := make(map[uint32]map[uint32]map[uint32]map[uint32]int32)
+
+	rng := random.NewRNG()
+	alternateTreeManager := AlternateTreeManager{}
+
+	for i, seed := range seeds {
+		conqueror := conquerors[i]
+
+		realSeed := seed
+		if data.TimelessJewelSeedRanges[timelessJewelType].Special {
+			realSeed *= 20
+		}
+
+		if i%100 == 0 && updates != nil {
+			updates(realSeed)
+		}
+
+		timelessJewelConqueror := data.TimelessJewelConquerors[timelessJewelType][conqueror]
+		timelessJewel := data.TimelessJewel{
+			AlternateTreeVersion:   alternateTreeVersion,
+			TimelessJewelConqueror: timelessJewelConqueror,
+			Seed:                   realSeed,
+		}
+
+		alternateTreeManager.TimelessJewel = timelessJewel
+
+		for _, skill := range uniquePassives {
+			alternateTreeManager.PassiveSkill = skill
+			var result data.AlternatePassiveSkillInformation
+
+			if alternateTreeManager.IsPassiveSkillReplaced(rng) {
+				result = alternateTreeManager.ReplacePassiveSkill(rng)
+			} else {
+				result = data.AlternatePassiveSkillInformation{
+					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(rng),
+				}
+			}
+
+			if result.AlternatePassiveSkill != nil {
+				for j, key := range result.AlternatePassiveSkill.StatsKeys {
+					if _, ok := statMap[key]; ok {
+						for _, socketID := range passiveToSockets[skill.Index] {
+							if _, ok := results[socketID]; !ok {
+								results[socketID] = make(map[uint32]map[uint32]map[uint32]int32)
+							}
+							if _, ok := results[socketID][realSeed]; !ok {
+								results[socketID][realSeed] = make(map[uint32]map[uint32]int32)
+							}
+							if _, ok := results[socketID][realSeed][skill.Index]; !ok {
+								results[socketID][realSeed][skill.Index] = make(map[uint32]int32)
+							}
+							if result.StatRolls != nil {
+								results[socketID][realSeed][skill.Index][key] = result.StatRolls[uint32(j)]
+							}
+						}
+					}
+				}
+			}
+
+			for _, augment := range result.AlternatePassiveAdditionInformations {
+				if augment.AlternatePassiveAddition != nil {
+					for j, key := range augment.AlternatePassiveAddition.StatsKeys {
+						if _, ok := statMap[key]; ok {
+							for _, socketID := range passiveToSockets[skill.Index] {
+								if _, ok := results[socketID]; !ok {
+									results[socketID] = make(map[uint32]map[uint32]map[uint32]int32)
+								}
+								if _, ok := results[socketID][realSeed]; !ok {
+									results[socketID][realSeed] = make(map[uint32]map[uint32]int32)
+								}
+								if _, ok := results[socketID][realSeed][skill.Index]; !ok {
+									results[socketID][realSeed][skill.Index] = make(map[uint32]int32)
+								}
+								if augment.StatRolls != nil {
+									results[socketID][realSeed][skill.Index][key] = augment.StatRolls[uint32(j)]
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return results
+}
+
 func ClearCache() {
 }

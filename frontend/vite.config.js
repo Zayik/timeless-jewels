@@ -4,7 +4,18 @@ import { sveltekit } from '@sveltejs/kit/vite';
 const config = {
   server: {
     fs: {
-      strict: false,
+      strict: false
+    },
+    proxy: {
+      '/api/trade': {
+        target: 'https://www.pathofexile.com',
+        changeOrigin: true,
+        secure: true,
+        headers: {
+          'Origin': 'https://www.pathofexile.com',
+          'Referer': 'https://www.pathofexile.com/'
+        }
+      }
     }
   },
   css: {

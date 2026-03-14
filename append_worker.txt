@@ -1,0 +1,97 @@
+  },
+  async targetedMassSearch(args: import('./skill_tree').TargetedMassMarketSearchConfig, callback: (seed: number) => Promise<void>): Promise<MassSearchResults> {
+    const searchResult = await calculator.TargetedMassMarketSearch(
+      args.socketToNodes,
+      args.stats.map((s) => s.id),
+      args.jewel,
+      args.seeds,
+      args.conquerors,
+      callback
+    );
+
+    const massResults: { [socketId: number]: SearchResults } = {};
+
+    for (const socketIdStr in searchResult) {
+      const socketId = parseInt(socketIdStr);
+      const socketSearchResult = searchResult[socketId];
+      if (!socketSearchResult) continue;
+
+      const searchGrouped: { [key: number]: SearchWithSeed[] } = {};
+      Object.keys(socketSearchResult).forEach((seedStr) => {
+        const seed = parseInt(seedStr);
+        let weight = 0;
+        const statCounts: Record<number, number> = {};
+        const skills = Object.keys(socketSearchResult[seed]!).map((skillIDStr) => {
+          const skillID = parseInt(skillIDStr);
+          Object.keys(socketSearchResult[seed]![skillID]!).forEach((st) => {
+            const n = parseInt(st);
+            statCounts[n] = (statCounts[n] || 0) + 1;
+            weight += args.stats.find((s) => s.id == n)?.weight || 0;
+          });
+
+          return {
+            passive: passiveToTree[skillID],
+            stats: socketSearchResult[seed]![skillID]! as { [key: string]: number }
+          };
+        });
+
+        if (weight < args.minTotalWeight) {
+          delete socketSearchResult[seedStr];
+          return;
+        }
+
+        for (const stat of args.stats) {
+          if ((statCounts[stat.id] === undefined && stat.min > 0) || statCounts[stat.id] < stat.min) {
+            delete socketSearchResult[seedStr];
+            return;
+          }
+        }
+
+        const len = Object.keys(socketSearchResult[seed]!).length;
+        if (!searchGrouped[len]) {
+          searchGrouped[len] = [];
+        }
+        searchGrouped[len].push({
+          skills: skills,
+          seed,
+          weight,
+          statCounts
+        });
+
+        delete socketSearchResult[seedStr];
+      });
+
+      const maxLen = Math.max(0, ...Object.keys(searchGrouped).map(x => parseInt(x) || 0));
+
+      Object.keys(searchGrouped).forEach((len) => {
+        const nLen = parseInt(len);
+        searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
+        
+        let limit = 100;
+        if (maxLen - nLen >= 3) limit = 0;
+        else if (maxLen - nLen === 2) limit = 5;
+        else if (maxLen - nLen === 1) limit = 20;
+
+        if (limit === 0) {
+          delete searchGrouped[nLen];
+        } else {
+          searchGrouped[nLen] = searchGrouped[nLen].slice(0, limit);
+        }
+      });
+
+      massResults[socketId] = {
+        grouped: searchGrouped,
+        raw: Object.keys(searchGrouped)
+          .map((x) => searchGrouped[parseInt(x)])
+          .flat()
+          .sort((a, b) => b.weight - a.weight)
+      };
+    }
+    calculator.ClearCache();
+    return { resultsBySocket: massResults };
+  }
+} as const;
+
+expose(obj);
+
+export type WorkerType = typeof obj;

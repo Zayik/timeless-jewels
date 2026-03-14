@@ -35,24 +35,24 @@ if (start > -1) {
   blockRegex.lastIndex = start + 4;
   let match;
   while ((match = blockRegex.exec(code)) !== null) {
-      if (match[0].startsWith('{#if')) {
-          depth++;
-      } else if (match[0] === '{/if}') {
-          depth--;
-          if (depth === 0) {
-              end = match.index + '{/if}'.length;
-              break;
-          }
+    if (match[0].startsWith('{#if')) {
+      depth++;
+    } else if (match[0] === '{/if}') {
+      depth--;
+      if (depth === 0) {
+        end = match.index + '{/if}'.length;
+        break;
       }
+    }
   }
-  
+
   if (end > -1) {
     code = code.substring(0, start) + newHTML + code.substring(end);
     fs.writeFileSync('src/routes/+page.svelte', code);
     console.log('Replaced successfully');
   } else {
-      console.log('Could not find end of block');
+    console.log('Could not find end of block');
   }
 } else {
-    console.log("Could not find start");
+  console.log('Could not find start');
 }

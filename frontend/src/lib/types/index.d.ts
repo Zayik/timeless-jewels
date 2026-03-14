@@ -4,6 +4,8 @@ export declare namespace calculator {
   function ClearCache(): void;
   function MassReverseSearch(scion?: Record<number, Array<number> | undefined>, statIDs?: Array<number>, timelessJewelType: number, conqueror: string, workerID: number, numWorkers: number, updates: (arg1: number) => Promise<void>): Promise<(Record<number, Record<number, Record<number, Record<number, number> | undefined> | undefined> | undefined> | undefined)>;
   function ReverseSearch(passiveIDs?: Array<number>, statIDs?: Array<number>, timelessJewelType: number, conqueror: string, workerID: number, numWorkers: number, updates: (arg1: number) => Promise<void>): Promise<(Record<number, Record<number, Record<number, number> | undefined> | undefined> | undefined)>;
+  function TargetedMarketSearch(passiveIDs?: Array<number>, statIDs?: Array<number>, timelessJewelType: number, seeds?: Array<number>, conquerors?: Array<string>, updates: (arg1: number) => Promise<void>): Promise<(Record<number, Record<number, Record<number, number> | undefined> | undefined> | undefined)>;
+  function TargetedMassMarketSearch(scion?: Record<number, Array<number> | undefined>, statIDs?: Array<number>, timelessJewelType: number, seeds?: Array<number>, conquerors?: Array<string>, updates: (arg1: number) => Promise<void>): Promise<(Record<number, Record<number, Record<number, Record<number, number> | undefined> | undefined> | undefined> | undefined)>;
 }
 export declare namespace data {
   interface AlternatePassiveAddition {
