@@ -4,6 +4,22 @@ import { data } from './types';
 const MAX_FETCH_SIZE = 10;
 const SEARCH_PAGE_SIZE = 100;
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+
+const INDEXED_WINDOWS: Array<{ option: string; ms: number }> = [
+  { option: '1hour',  ms:  1 * 60 * 60 * 1000 },
+  { option: '3hours', ms:  3 * 60 * 60 * 1000 },
+  { option: '12hours',ms: 12 * 60 * 60 * 1000 },
+  { option: '1day',   ms:  1 * 24 * 60 * 60 * 1000 },
+  { option: '3days',  ms:  3 * 24 * 60 * 60 * 1000 },
+  { option: '1week',  ms:  7 * 24 * 60 * 60 * 1000 },
+];
+
+const pickIndexedWindow = (lastSyncDate: string): string => {
+  const elapsed = Date.now() - new Date(lastSyncDate).getTime();
+  // Add a 20% buffer so we don't clip listings right at the boundary
+  const needed = elapsed * 1.2;
+  return (INDEXED_WINDOWS.find((w) => w.ms >= needed) ?? INDEXED_WINDOWS[INDEXED_WINDOWS.length - 1]).option;
+};
 // Max seed gap between two cached seeds before we split them into separate range queries
 const SEED_CLUSTER_GAP = 50;
 
@@ -379,10 +395,11 @@ export const fetchMarketJewels = async (
 ): Promise<void> => {
   const isStale = !lastSyncDate || Date.now() - new Date(lastSyncDate).getTime() >= STALE_THRESHOLD_MS;
   const isIncremental = !isStale;
+  const indexedWindow = isIncremental ? pickIndexedWindow(lastSyncDate!) : null;
 
   onProgress(
     isIncremental
-      ? 'Incremental sync: fetching items newer than last sync...'
+      ? `Incremental sync: fetching items listed in the last ${indexedWindow}...`
       : 'Full sync: no recent cache or cache is stale, fetching all listed items...'
   );
 
@@ -433,8 +450,8 @@ export const fetchMarketJewels = async (
         ...(isIncremental ? { sort: { indexed: 'desc' } } : {})
       };
 
-      if (isIncremental) {
-        payload.query.filters = { trade_filters: { filters: { indexed: { option: '1week' } } } };
+      if (isIncremental && indexedWindow) {
+        payload.query.filters = { trade_filters: { filters: { indexed: { option: indexedWindow } } } };
       }
 
       const firstPage = await searchTradePage(
