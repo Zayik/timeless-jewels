@@ -38,6 +38,9 @@
           {set.conqueror} {#if set.price}- {set.price}{/if}
         </span>
       {/if}
+      {#if set.listedAt}
+        <span class="text-xs text-gray-500">{new Date(set.listedAt).toLocaleTimeString()}</span>
+      {/if}
     </div>
     <button class="px-3 bg-blue-500/40 rounded self-start" on:click={() => openTrade(jewel, set.conqueror || conqueror, [set], platform, league)}>Trade</button>
   </div>

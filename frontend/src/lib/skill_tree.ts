@@ -337,6 +337,7 @@ export interface SearchWithSeed {
   seed: number;
   conqueror?: string;
   price?: string;
+  listedAt?: string;
   weight: number;
   statCounts: Record<number, number>;
   skills: {
@@ -478,6 +479,7 @@ export interface TargetedMassMarketSearchConfig {
   seeds: number[];
   conquerors: string[];
   prices?: string[];
+  listedAts?: string[];
   socketToNodes: { [socketId: number]: number[] };
   stats: StatConfig[];
   minTotalWeight: number;

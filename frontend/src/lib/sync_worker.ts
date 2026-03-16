@@ -137,7 +137,7 @@ const obj = {
         // Fast lookup maps
         const seedToConq = new Map<number, string>();
         const seedToPrice = new Map<number, string>();
-        args.seeds.forEach((s, i) => {
+        args.seeds?.forEach((s, i) => {
             seedToConq.set(s, args.conquerors[i]);
             if (args.prices && args.prices[i]) {
                 seedToPrice.set(s, args.prices[i]);
@@ -246,10 +246,14 @@ const obj = {
         // Fast lookup maps
         const seedToConq = new Map<number, string>();
         const seedToPrice = new Map<number, string>();
+        const seedToListedAt = new Map<number, string>();
         args.seeds.forEach((s, i) => {
             seedToConq.set(s, args.conquerors[i]);
             if (args.prices && args.prices[i]) {
                 seedToPrice.set(s, args.prices[i]);
+            }
+            if (args.listedAts && args.listedAts[i]) {
+                seedToListedAt.set(s, args.listedAts[i]);
             }
         });
 
@@ -293,7 +297,8 @@ const obj = {
           weight,
           statCounts,
           conqueror: seedToConq.get(seed),
-          price: seedToPrice.get(seed)
+          price: seedToPrice.get(seed),
+          listedAt: seedToListedAt.get(seed)
         });
 
         delete socketSearchResult[seedStr];

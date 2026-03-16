@@ -531,7 +531,7 @@
   onMount(() => {  
     getLeagues();
   });
-  import { fetchMarketJewels, pruneStaleMarketJewels } from '$lib/trade_api';
+  import { fetchMarketJewels, pruneStaleMarketJewels, openLiveSearch } from '$lib/trade_api';
   import { getCachedJewels, getCacheTime, setCachedJewels, clearCachedJewels } from '$lib/market_cache';
   import type { MarketJewel } from '$lib/market_cache';
 
@@ -547,6 +547,13 @@
   let cacheTime: Date | null = null;
   let marketConquerorFilter = 'All';
   let marketSort: 'price' | 'seed' | 'date' = 'price';
+
+  // Live feed state
+  let liveFeeds: Array<() => void> = [];
+  let liveFeedAllActive = false;
+  let liveFeedSocketActive = false;
+  let liveAccumulator: MassSearchResults = { resultsBySocket: {} };
+  let liveFeedStatus = '';
 
   const CURRENCY_TIER: Record<string, number> = { divine: 1000, div: 1000, exalted: 100, ex: 100, chaos: 1 };
   const parsePrice = (price: string): number => {
@@ -638,6 +645,86 @@
     } finally {
       fetchingMarket = false;
       marketProgress = '';
+    }
+  };
+
+  const buildSocketToNodes = (): { [key: number]: number[] } => {
+    const allSockets = Object.keys(skillTree.nodes)
+      .map(k => parseInt(k))
+      .filter(k => skillTree.nodes[k]?.isJewelSocket);
+    const map: { [key: number]: number[] } = {};
+    allSockets.forEach(socketId => {
+      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter(n => n && !n.isJewelSocket && !n.isMastery);
+      map[socketId] = affected.map(n => data.TreeToPassive[n.skill]).filter(Boolean).map(n => n.Index);
+    });
+    return map;
+  };
+
+  const stopLiveFeed = () => {
+    liveFeeds.forEach(fn => fn());
+    liveFeeds = [];
+    liveFeedAllActive = false;
+    liveFeedSocketActive = false;
+    liveFeedStatus = 'Live feed stopped.';
+  };
+
+  const startLiveFeed = async (allSockets: boolean) => {
+    if (!selectedJewel || !selectedConqueror || Object.keys(selectedStats).length === 0) return;
+    if (!allSockets && !circledNode) return;
+
+    if (allSockets) liveFeedAllActive = true;
+    else liveFeedSocketActive = true;
+
+    liveAccumulator = { resultsBySocket: {} };
+    massSearchResults = undefined;
+    searchResults = undefined;
+    results = true;
+
+    const socketToNodes = allSockets
+      ? buildSocketToNodes()
+      : { [circledNode]: affectedNodes
+          .filter(n => !disabled.has(n.skill))
+          .map(n => data.TreeToPassive[n.skill])
+          .filter(Boolean)
+          .map(n => n.Index) };
+
+    const handleNewJewels = async (jewels: MarketJewel[]) => {
+      const jewelMap = new Map(cachedJewels.filter(j => j.id).map(j => [j.id, j]));
+      for (const j of jewels) { if (j.id) jewelMap.set(j.id, j); }
+      cachedJewels = [...jewelMap.values(), ...cachedJewels.filter(j => !j.id)];
+      setCachedJewels(selectedJewel.value, league?.value || 'Standard', cachedJewels);
+
+      const partial = await syncWrap.targetedMassSearch(
+        {
+          jewel: selectedJewel.value,
+          seeds: jewels.map(j => j.seed),
+          conquerors: jewels.map(j => j.worshipper),
+          prices: jewels.map(j => j.price),
+          listedAts: jewels.map(j => j.listedAt),
+          socketToNodes,
+          stats: Object.values(selectedStats).filter(s => s.weight > 0),
+          minTotalWeight
+        },
+        proxy(async () => {})
+      );
+
+      liveAccumulator = syncWrap.mergeMassResults(liveAccumulator, partial);
+      massSearchResults = liveAccumulator;
+    };
+
+    try {
+      const cleanup = await openLiveSearch(
+        selectedJewel.value,
+        league?.value || 'Standard',
+        poeSessId,
+        handleNewJewels,
+        (msg) => { liveFeedStatus = msg; }
+      );
+      liveFeeds = [cleanup];
+    } catch (e: any) {
+      alert(e.message || 'Failed to start live feed');
+      liveFeedAllActive = false;
+      liveFeedSocketActive = false;
     }
   };
 
@@ -1155,6 +1242,29 @@
                           {/if}
                         </button>
                       </div>
+                    {/if}
+                    <div class="flex flex-row mt-2 space-x-2">
+                      <button
+                        class="p-2 px-3 w-1/2 rounded disabled:opacity-40"
+                        class:bg-emerald-600={!liveFeedSocketActive}
+                        class:bg-red-600={liveFeedSocketActive}
+                        class:animate-pulse={liveFeedSocketActive}
+                        on:click={() => liveFeedSocketActive ? stopLiveFeed() : startLiveFeed(false)}
+                        disabled={searching || Object.keys(selectedStats).length === 0 || !selectedJewel || !circledNode}>
+                        {liveFeedSocketActive ? '■ Stop Live' : 'Live Market: This Socket'}
+                      </button>
+                      <button
+                        class="p-2 px-3 w-1/2 rounded disabled:opacity-40"
+                        class:bg-emerald-600={!liveFeedAllActive}
+                        class:bg-red-600={liveFeedAllActive}
+                        class:animate-pulse={liveFeedAllActive}
+                        on:click={() => liveFeedAllActive ? stopLiveFeed() : startLiveFeed(true)}
+                        disabled={searching || Object.keys(selectedStats).length === 0 || !selectedJewel}>
+                        {liveFeedAllActive ? '■ Stop Live' : 'Live Market: All Sockets'}
+                      </button>
+                    </div>
+                    {#if liveFeedStatus}
+                      <div class="text-xs text-gray-400 mt-1">{liveFeedStatus}</div>
                     {/if}
                     <div class="flex flex-row mt-2 space-x-2 items-center">
                       <input

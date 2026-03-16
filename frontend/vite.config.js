@@ -11,6 +11,7 @@ const config = {
         target: 'https://www.pathofexile.com',
         changeOrigin: true,
         secure: true,
+        ws: true,
         headers: {
           'Origin': 'https://www.pathofexile.com',
           'Referer': 'https://www.pathofexile.com/'

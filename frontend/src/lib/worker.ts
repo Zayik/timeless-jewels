@@ -30,6 +30,36 @@ function getWorkerPool(): WorkerData[] {
 
 const pool: WorkerData[] = browser ? getWorkerPool() : [];
 
+function mergeAndTrimSocketResults(
+  target: { [socketId: number]: SearchResults },
+  source: { [socketId: number]: SearchResults }
+): void {
+  for (const socketIdStr in source) {
+    const socketId = parseInt(socketIdStr);
+    if (!target[socketId]) target[socketId] = { grouped: {}, raw: [] };
+    const tGrouped = target[socketId].grouped;
+    const sGrouped = source[socketId].grouped;
+    for (const key of Object.keys(sGrouped)) {
+      const n = parseInt(key);
+      tGrouped[n] = [...(tGrouped[n] || []), ...sGrouped[n]];
+    }
+    const maxLen = Math.max(0, ...Object.keys(tGrouped).map(x => parseInt(x) || 0));
+    for (const key of Object.keys(tGrouped)) {
+      const n = parseInt(key);
+      tGrouped[n] = tGrouped[n].sort((a, b) => b.weight - a.weight);
+      let limit = 100;
+      if (maxLen - n >= 3) limit = 0;
+      else if (maxLen - n === 2) limit = 5;
+      else if (maxLen - n === 1) limit = 20;
+      if (limit === 0) delete tGrouped[n];
+      else tGrouped[n] = tGrouped[n].slice(0, limit);
+    }
+    target[socketId].raw = Object.values(target[socketId].grouped)
+      .flat()
+      .sort((a, b) => b.weight - a.weight);
+  }
+}
+
 export const syncWrap = browser
   ? {
       boot: (wasm: ArrayBuffer) => {
@@ -225,6 +255,21 @@ export const syncWrap = browser
         }
 
         return { resultsBySocket: massResults };
+      },
+      mergeMassResults: (a: MassSearchResults, b: MassSearchResults): MassSearchResults => {
+        const merged: { [socketId: number]: SearchResults } = {};
+        for (const socketIdStr in a.resultsBySocket) {
+          const socketId = parseInt(socketIdStr);
+          const src = a.resultsBySocket[socketId];
+          merged[socketId] = {
+            grouped: Object.fromEntries(
+              Object.entries(src.grouped).map(([k, v]) => [k, [...v]])
+            ),
+            raw: [...src.raw]
+          };
+        }
+        mergeAndTrimSocketResults(merged, b.resultsBySocket);
+        return { resultsBySocket: merged };
       }
     }
   : null;

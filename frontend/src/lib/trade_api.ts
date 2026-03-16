@@ -32,6 +32,8 @@ const JEWEL_CONQUERORS: Record<number, string[]> = {
   6: ['vorana', 'uhtred', 'medved']
 };
 
+export { JEWEL_CONQUERORS };
+
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 type RateLimitHeaders = {
@@ -508,4 +510,120 @@ export const fetchMarketJewels = async (
   }
 
   onProgress(`Complete. Total synced: ${totalFound} jewels.`);
+};
+
+/**
+ * Opens a single PoE Trade live search WebSocket covering all conquerors for
+ * a jewel type. Conqueror is detected from each item's explicit mod text.
+ * Calls onJewels each time new listings arrive. Returns a cleanup function.
+ */
+export const openLiveSearch = async (
+  jewelId: number,
+  league: string,
+  poesessid: string,
+  onJewels: (jewels: MarketJewel[]) => void,
+  onStatus: (msg: string) => void
+): Promise<() => void> => {
+  const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
+  const baseUrl =
+    typeof window !== 'undefined' && window.location.hostname === 'localhost'
+      ? ''
+      : 'https://www.pathofexile.com';
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json'
+  };
+  if (poesessid) headers['X-Poe-Session'] = poesessid;
+
+  // No stat filter — matches all conquerors for this jewel type in one query
+  const payload = {
+    query: {
+      status: { option: 'online' },
+      name: baseName,
+      type: 'Timeless Jewel'
+    },
+    sort: { indexed: 'desc' }
+  };
+
+  let searchRes: Response;
+  try {
+    searchRes = await fetch(`${baseUrl}/api/trade/search/${league}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    });
+  } catch {
+    throw new Error('Network error starting live search. Ensure your CORS Unblock extension is active.');
+  }
+
+  if (!searchRes.ok) {
+    throw new Error(`Trade search failed (${searchRes.status}). Check your POESESSID and CORS extension.`);
+  }
+
+  const { id: queryId } = await searchRes.json();
+  onStatus(`Live feed ready for all ${baseName} conquerors (${league})`);
+
+  // On localhost the Vite proxy handles the WebSocket (ws: true in vite.config.js).
+  // In production, connect directly to pathofexile.com.
+  const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const wsUrl = isLocal
+    ? `ws://${window.location.host}/api/trade/live/${league}/${queryId}`
+    : `wss://www.pathofexile.com/api/trade/live/${league}/${queryId}`;
+  const ws = new WebSocket(wsUrl);
+
+  // Build lowercase conqueror name list for detection from mod text
+  const knownConquerors = JEWEL_CONQUERORS[jewelId] || [];
+
+  ws.onopen = () => onStatus(`Watching for new ${baseName} listings...`);
+  ws.onerror = () => onStatus('WebSocket error — check your CORS Unblock extension.');
+  ws.onclose = () => onStatus('Live feed closed.');
+
+  ws.onmessage = async (event) => {
+    let msg: { new?: string[] };
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (!msg.new || msg.new.length === 0) return;
+
+    const chunk = msg.new.slice(0, MAX_FETCH_SIZE);
+    const fetchUrl = `${baseUrl}/api/trade/fetch/${chunk.join(',')}?query=${queryId}`;
+    let fetchRes: Response;
+    try {
+      fetchRes = await fetch(fetchUrl, { headers });
+    } catch {
+      return;
+    }
+    if (!fetchRes.ok) return;
+
+    const fetchData = await fetchRes.json();
+    const jewels: MarketJewel[] = [];
+
+    for (const item of fetchData.result || []) {
+      const modText = (item.item?.explicitMods || []).join(' ').toLowerCase();
+
+      let seed = 0;
+      for (const mod of item.item?.explicitMods || []) {
+        const match = mod.match(/(\d+)/);
+        if (match) { seed = parseInt(match[1]); break; }
+      }
+      if (seed <= 0) continue;
+
+      const matched = knownConquerors.find(c => modText.includes(c));
+      if (!matched) continue;
+      const worshipper = matched.charAt(0).toUpperCase() + matched.slice(1);
+
+      const price = item.listing?.price
+        ? `${item.listing.price.amount} ${item.listing.price.currency}`
+        : '';
+      const listedAt = item.listing?.indexed || new Date().toISOString();
+      jewels.push({ id: item.id, seed, worshipper, price, listedAt });
+    }
+
+    if (jewels.length > 0) onJewels(jewels);
+  };
+
+  return () => ws.close();
 };
