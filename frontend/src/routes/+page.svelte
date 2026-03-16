@@ -688,6 +688,45 @@
     results = true;
   };
 
+  let seedSearchInput: number = 0;
+
+  const searchBySeed = async () => {
+    if (!selectedJewel || !selectedConqueror || !seedSearchInput) return;
+
+    searchJewel = selectedJewel.value;
+    searchConqueror = selectedConqueror.value;
+    searching = true;
+    massSearchResults = undefined;
+    searchResults = undefined;
+    seedsProcessed = 0;
+
+    const allSockets = Object.keys(skillTree.nodes)
+      .map(k => parseInt(k))
+      .filter(k => skillTree.nodes[k]?.isJewelSocket);
+    const socketToNodes: { [key: number]: number[] } = {};
+    allSockets.forEach(socketId => {
+      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter(n => n && !n.isJewelSocket && !n.isMastery);
+      socketToNodes[socketId] = affected.map(n => data.TreeToPassive[n.skill]).filter(Boolean).map(n => n.Index);
+    });
+    activeSocketsCount = allSockets.length;
+
+    const res = await syncWrap.targetedMassSearch(
+      {
+        jewel: selectedJewel.value,
+        seeds: [seedSearchInput],
+        conquerors: [selectedConqueror.value],
+        socketToNodes,
+        stats: Object.values(selectedStats).filter(s => s.weight > 0),
+        minTotalWeight
+      },
+      proxy(async () => { seedsProcessed++; })
+    );
+
+    massSearchResults = res;
+    searching = false;
+    results = true;
+  };
+
   const marketSearchCurrentSocket = async () => {
     if (!selectedJewel || !circledNode) return;
     if (filteredMarketJewels.length === 0) {
@@ -1117,6 +1156,25 @@
                         </button>
                       </div>
                     {/if}
+                    <div class="flex flex-row mt-2 space-x-2 items-center">
+                      <input
+                        type="number"
+                        class="p-2 bg-gray-700 rounded text-white w-32 min-w-0"
+                        placeholder="Seed"
+                        min="0"
+                        bind:value={seedSearchInput} />
+                      <button
+                        class="p-2 px-3 bg-purple-500/40 rounded disabled:bg-purple-900/40 flex-1"
+                        on:click={searchBySeed}
+                        disabled={searching || Object.keys(selectedStats).length === 0 || !seedSearchInput || !selectedConqueror}
+                        title="Search this specific seed across all jewel sockets">
+                        {#if searching && massSearchResults === undefined && searchResults === undefined}
+                          Searching...
+                        {:else}
+                          Seed: All Sockets
+                        {/if}
+                      </button>
+                    </div>
                   </div>
                 {/if}
               {/if}
