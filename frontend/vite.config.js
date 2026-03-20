@@ -13,8 +13,8 @@ const config = {
         secure: true,
         ws: true,
         headers: {
-          'Origin': 'https://www.pathofexile.com',
-          'Referer': 'https://www.pathofexile.com/'
+          Origin: 'https://www.pathofexile.com',
+          Referer: 'https://www.pathofexile.com/'
         }
       }
     }

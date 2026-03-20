@@ -170,7 +170,9 @@
   const totalSeeds = () => {
     const jewelId = searchJewel || selectedJewel?.value || 0;
     const range = data.TimelessJewelSeedRanges[jewelId];
-    if (!range) return 0;
+    if (!range) {
+  return 0;
+  }
     
     let count = (range.Max - range.Min) + 1;
     if (range.Special) {
@@ -211,7 +213,9 @@
     syncWrap
       .search(
         query,
-        proxy((s) => { currentSeed = s; seedsProcessed += 100; })
+        proxy((s) => {
+   currentSeed = s; seedsProcessed += 100; 
+  })
       )
       .then((result) => {
         searchResults = result;
@@ -252,7 +256,9 @@
     };
 
     activeSocketsCount = Object.keys(socketToNodes).length;
-    seedsProcessed = 0; syncWrap.massSearch(query, proxy((s) => { seedsProcessed += (100 * activeSocketsCount); })).then((result) => {
+    seedsProcessed = 0; syncWrap.massSearch(query, proxy((s) => {
+   seedsProcessed += (100 * activeSocketsCount); 
+  })).then((result) => {
       massSearchResults = result; console.log('MAIN THREAD massSearch result: ', JSON.stringify(result, null, 2));
       searching = false;
       results = true;
@@ -517,7 +523,7 @@
     leagues = sortedLeagues.map((l: { name: string }) => ({ value: l.name, label: l.name }));
     
     // The main active challenge league is the newest one that isn't HC, SSF, or Ruthless
-    let defaultLeague = leagues.find((l) => !l.value.includes('Ruthless') && !l.value.includes('Self-Found') && !l.value.includes('Hardcore') && !l.value.includes('Standard')) 
+    const defaultLeague = leagues.find((l) => !l.value.includes('Ruthless') && !l.value.includes('Self-Found') && !l.value.includes('Hardcore') && !l.value.includes('Standard')) 
                         || leagues.find(l => l.value === 'Standard') 
                         || leagues[0];
                         
@@ -576,7 +582,9 @@
     poeSessId = localStorage.getItem('poesessid') || '';
   });
 
-  $: if (poeSessId) localStorage.setItem('poesessid', poeSessId);
+  $: if (poeSessId) {
+  localStorage.setItem('poesessid', poeSessId);
+  }
 
   $: if (selectedJewel && league) {
      cachedJewels = getCachedJewels(selectedJewel.value, league.value);
@@ -584,7 +592,9 @@
   }
 
     const syncMarket = async () => {
-    if (!selectedJewel) return;
+    if (!selectedJewel) {
+  return;
+  }
     fetchingMarket = true;
     try {
       const lastSyncStr = cacheTime ? cacheTime.toISOString() : undefined;
@@ -596,12 +606,18 @@
         (chunk) => {
           const jewelMap = new Map();
           for (const j of cachedJewels) {
-            if (j.id) jewelMap.set(j.id, j);
-            else jewelMap.set(`${j.seed}_${j.worshipper}`, j);
+            if (j.id) {
+  jewelMap.set(j.id, j);
+  } else {
+  jewelMap.set(`${j.seed}_${j.worshipper}`, j);
+  }
           }
           for (const j of chunk) {
-            if (j.id) jewelMap.set(j.id, j);
-            else jewelMap.set(`${j.seed}_${j.worshipper}`, j);
+            if (j.id) {
+  jewelMap.set(j.id, j);
+  } else {
+  jewelMap.set(`${j.seed}_${j.worshipper}`, j);
+  }
           }
           const merged = Array.from(jewelMap.values());
           setCachedJewels(selectedJewel.value, league?.value || 'Standard', merged);
@@ -619,15 +635,21 @@
   };
 
   const clearMarketCache = () => {
-    if (!selectedJewel) return;
-    if (!confirm(`Clear all cached market data for ${selectedJewel.label} (${league?.value || 'Standard'})?`)) return;
+    if (!selectedJewel) {
+  return;
+  }
+    if (!confirm(`Clear all cached market data for ${selectedJewel.label} (${league?.value || 'Standard'})?`)) {
+  return;
+  }
     clearCachedJewels(selectedJewel.value, league?.value || 'Standard');
     cachedJewels = [];
     cacheTime = null;
   };
 
   const pruneMarketCache = async () => {
-    if (!selectedJewel || cachedJewels.length === 0) return;
+    if (!selectedJewel || cachedJewels.length === 0) {
+  return;
+  }
     fetchingMarket = true;
     try {
       const pruned = await pruneStaleMarketJewels(
@@ -669,11 +691,18 @@
   };
 
   const startLiveFeed = async (allSockets: boolean) => {
-    if (!selectedJewel || !selectedConqueror || Object.keys(selectedStats).length === 0) return;
-    if (!allSockets && !circledNode) return;
+    if (!selectedJewel || !selectedConqueror || Object.keys(selectedStats).length === 0) {
+  return;
+  }
+    if (!allSockets && !circledNode) {
+  return;
+  }
 
-    if (allSockets) liveFeedAllActive = true;
-    else liveFeedSocketActive = true;
+    if (allSockets) {
+  liveFeedAllActive = true;
+  } else {
+  liveFeedSocketActive = true;
+  }
 
     liveAccumulator = { resultsBySocket: {} };
     massSearchResults = undefined;
@@ -690,7 +719,11 @@
 
     const handleNewJewels = async (jewels: MarketJewel[]) => {
       const jewelMap = new Map(cachedJewels.filter(j => j.id).map(j => [j.id, j]));
-      for (const j of jewels) { if (j.id) jewelMap.set(j.id, j); }
+      for (const j of jewels) {
+   if (j.id) {
+  jewelMap.set(j.id, j);
+  } 
+  }
       cachedJewels = [...jewelMap.values(), ...cachedJewels.filter(j => !j.id)];
       setCachedJewels(selectedJewel.value, league?.value || 'Standard', cachedJewels);
 
@@ -718,7 +751,9 @@
         league?.value || 'Standard',
         poeSessId,
         handleNewJewels,
-        (msg) => { liveFeedStatus = msg; }
+        (msg) => {
+   liveFeedStatus = msg; 
+  }
       );
       liveFeeds = [cleanup];
     } catch (e: any) {
@@ -729,7 +764,9 @@
   };
 
   const marketSearchAllSockets = async () => {
-    if (!selectedJewel) return;
+    if (!selectedJewel) {
+  return;
+  }
     if (filteredMarketJewels.length === 0) {
       alert('No jewels in market cache for the selected conqueror filter.');
       return;
@@ -767,7 +804,9 @@
         stats: Object.values(selectedStats).filter((s) => s.weight > 0),
         minTotalWeight
       },
-      proxy(async () => { seedsProcessed++; })
+      proxy(async () => {
+   seedsProcessed++; 
+  })
     );
 
     massSearchResults = res;
@@ -778,7 +817,9 @@
   let seedSearchInput: number = 0;
 
   const searchBySeed = async () => {
-    if (!selectedJewel || !selectedConqueror || !seedSearchInput) return;
+    if (!selectedJewel || !selectedConqueror || !seedSearchInput) {
+  return;
+  }
 
     searchJewel = selectedJewel.value;
     searchConqueror = selectedConqueror.value;
@@ -806,7 +847,9 @@
         stats: Object.values(selectedStats).filter(s => s.weight > 0),
         minTotalWeight
       },
-      proxy(async () => { seedsProcessed++; })
+      proxy(async () => {
+   seedsProcessed++; 
+  })
     );
 
     massSearchResults = res;
@@ -815,7 +858,9 @@
   };
 
   const marketSearchCurrentSocket = async () => {
-    if (!selectedJewel || !circledNode) return;
+    if (!selectedJewel || !circledNode) {
+  return;
+  }
     if (filteredMarketJewels.length === 0) {
       alert('No jewels in market cache for the selected conqueror filter.');
       return;
@@ -844,7 +889,9 @@
         stats: Object.values(selectedStats).filter(s => s.weight > 0),
         minTotalWeight
       },
-      proxy(async () => { seedsProcessed++; })
+      proxy(async () => {
+   seedsProcessed++; 
+  })
     );
 
     massSearchResults = res;
@@ -1094,7 +1141,11 @@
                     <ul class="mt-4 overflow-auto" class:rainbow={colored}>
                       {#each sortCombined(combineResults(seedResults, colored, 'all'), sortOrder.value) as r}
                         <li>
-                          <div class="cursor-pointer" role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); highlight(seed, r.passives); } }} on:click={() => highlight(seed, r.passives)}>
+                          <div class="cursor-pointer" role="button" tabindex="0" on:keydown={(e) => {
+ if (e.key === 'Enter' || e.key === ' ') {
+ e.preventDefault(); highlight(seed, r.passives); 
+} 
+}} on:click={() => highlight(seed, r.passives)}>
                             <span class="font-bold" class:text-white={(statValues[r.id] || 0) < 3}
                               >({r.passives.length})</span>
                             <span class="text-white">{@html r.stat}</span>
@@ -1108,7 +1159,11 @@
                       <ul class="mt-1" class:rainbow={colored}>
                         {#each sortCombined(combineResults(seedResults, colored, 'notables'), sortOrder.value) as r}
                           <li>
-                            <div class="cursor-pointer" role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); highlight(seed, r.passives); } }} on:click={() => highlight(seed, r.passives)}>
+                            <div class="cursor-pointer" role="button" tabindex="0" on:keydown={(e) => {
+ if (e.key === 'Enter' || e.key === ' ') {
+ e.preventDefault(); highlight(seed, r.passives); 
+} 
+}} on:click={() => highlight(seed, r.passives)}>
                               <span class="font-bold" class:text-white={(statValues[r.id] || 0) < 3}
                                 >({r.passives.length})</span>
                               <span class="text-white">{@html r.stat}</span>
@@ -1121,7 +1176,11 @@
                       <ul class="mt-1" class:rainbow={colored}>
                         {#each sortCombined(combineResults(seedResults, colored, 'passives'), sortOrder.value) as r}
                           <li>
-                            <div class="cursor-pointer" role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); highlight(seed, r.passives); } }} on:click={() => highlight(seed, r.passives)}>
+                            <div class="cursor-pointer" role="button" tabindex="0" on:keydown={(e) => {
+ if (e.key === 'Enter' || e.key === ' ') {
+ e.preventDefault(); highlight(seed, r.passives); 
+} 
+}} on:click={() => highlight(seed, r.passives)}>
                               <span class="font-bold" class:text-white={(statValues[r.id] || 0) < 3}
                                 >({r.passives.length})</span>
                               <span class="text-white">{@html r.stat}</span>
@@ -1309,10 +1368,18 @@
                 {#each Object.keys(massSearchResults.resultsBySocket) as socketId}
                   {#if massSearchResults.resultsBySocket[socketId].grouped[matchCount] && massSearchResults.resultsBySocket[socketId].grouped[matchCount].length > 0}
                     <div class="mt-2 border-t pt-2 border-white/20">
-                      <h4 class="text-xl font-bold text-orange-400 cursor-pointer mb-2" tabindex="0" role="button" on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); circledNode = parseInt(socketId); skillTreeComponent.centerOnNode(parseInt(socketId)); updateUrl(); } }} on:click={() => { circledNode = parseInt(socketId); skillTreeComponent.centerOnNode(parseInt(socketId)); updateUrl(); }}>
+                      <h4 class="text-xl font-bold text-orange-400 cursor-pointer mb-2" tabindex="0" role="button" on:keydown={(e) => {
+ if (e.key === 'Enter' || e.key === ' ') {
+ e.preventDefault(); circledNode = parseInt(socketId); skillTreeComponent.centerOnNode(parseInt(socketId)); updateUrl(); 
+} 
+}} on:click={() => {
+ circledNode = parseInt(socketId); skillTreeComponent.centerOnNode(parseInt(socketId)); updateUrl(); 
+}}>
                           {skillTree.nodes[parseInt(socketId)]?.name || 'Jewel Socket'} ({socketId})
                       </h4>
-                      <SearchResults searchResults={{ grouped: { [matchCount]: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }, raw: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }} highlight={(seed, passives) => { circledNode = parseInt(socketId); highlight(seed, passives); skillTreeComponent.centerOnNode(parseInt(socketId)); }} groupResults={true} jewel={searchJewel} conqueror={searchConqueror} platform={platform.value} league={league.value} />
+                      <SearchResults searchResults={{ grouped: { [matchCount]: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }, raw: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }} highlight={(seed, passives) => {
+ circledNode = parseInt(socketId); highlight(seed, passives); skillTreeComponent.centerOnNode(parseInt(socketId)); 
+}} groupResults={true} jewel={searchJewel} conqueror={searchConqueror} platform={platform.value} league={league.value} />
                     </div>
                   {/if}
                 {/each}

@@ -6,12 +6,12 @@ const SEARCH_PAGE_SIZE = 100;
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 
 const INDEXED_WINDOWS: Array<{ option: string; ms: number }> = [
-  { option: '1hour',  ms:  1 * 60 * 60 * 1000 },
-  { option: '3hours', ms:  3 * 60 * 60 * 1000 },
-  { option: '12hours',ms: 12 * 60 * 60 * 1000 },
-  { option: '1day',   ms:  1 * 24 * 60 * 60 * 1000 },
-  { option: '3days',  ms:  3 * 24 * 60 * 60 * 1000 },
-  { option: '1week',  ms:  7 * 24 * 60 * 60 * 1000 },
+  { option: '1hour', ms: 1 * 60 * 60 * 1000 },
+  { option: '3hours', ms: 3 * 60 * 60 * 1000 },
+  { option: '12hours', ms: 12 * 60 * 60 * 1000 },
+  { option: '1day', ms: 1 * 24 * 60 * 60 * 1000 },
+  { option: '3days', ms: 3 * 24 * 60 * 60 * 1000 },
+  { option: '1week', ms: 7 * 24 * 60 * 60 * 1000 }
 ];
 
 const pickIndexedWindow = (lastSyncDate: string): string => {
@@ -55,7 +55,9 @@ const extractRateLimitHeaders = (res: Response): RateLimitHeaders => ({
  * wait based on the most constrained window that's close to its limit.
  */
 const computeWaitFromPair = (stateStr: string | null, limitStr: string | null): number => {
-  if (!stateStr || !limitStr) return 0;
+  if (!stateStr || !limitStr) {
+return 0;
+}
   const stateWindows = stateStr.split(',').map((w) => w.split(':').map(Number));
   const limitWindows = limitStr.split(',').map((w) => w.split(':').map(Number));
   let waitMs = 0;
@@ -74,11 +76,7 @@ const computeWaitFromPair = (stateStr: string | null, limitStr: string | null): 
 };
 
 const computeRateLimitWait = (rl: RateLimitHeaders, minimumDelayMs: number): number =>
-  Math.max(
-    minimumDelayMs,
-    computeWaitFromPair(rl.ipState, rl.ip),
-    computeWaitFromPair(rl.accountState, rl.account)
-  );
+  Math.max(minimumDelayMs, computeWaitFromPair(rl.ipState, rl.ip), computeWaitFromPair(rl.accountState, rl.account));
 
 const waitForRateLimit = async (rl: RateLimitHeaders, minimumDelayMs: number) => {
   await delay(computeRateLimitWait(rl, minimumDelayMs));
@@ -164,7 +162,9 @@ const safeFetchJewelDetails = async (
   let reachedOldItem = false;
 
   for (let i = 0; i < hashes.length; i += MAX_FETCH_SIZE) {
-    if (reachedOldItem) break;
+    if (reachedOldItem) {
+break;
+}
 
     const chunk = hashes.slice(i, i + MAX_FETCH_SIZE);
     const fetchUrl = `${baseUrl}/api/trade/fetch/${chunk.join(',')}?query=${queryId}`;
@@ -229,7 +229,9 @@ const safeFetchJewelDetails = async (
 
 /** Group sorted seed values into contiguous clusters to minimise search queries. */
 const clusterSeeds = (seeds: number[]): Array<{ min: number; max: number }> => {
-  if (seeds.length === 0) return [];
+  if (seeds.length === 0) {
+return [];
+}
   const sorted = [...seeds].sort((a, b) => a - b);
   const clusters: Array<{ min: number; max: number }> = [];
   let clusterMin = sorted[0];
@@ -304,7 +306,9 @@ const fetchActiveHashesForRange = async (
         onProgress,
         `Rate limited during prune scan page ${pageIndex + 1} (${conqueror} ${range.min}-${range.max}).`
       );
-      if (page.hashes.length === 0) break;
+      if (page.hashes.length === 0) {
+break;
+}
       page.hashes.forEach((h) => active.add(h));
       await waitForRateLimit(page.rl, 3000);
     }
@@ -329,15 +333,15 @@ export const pruneStaleMarketJewels = async (
 ): Promise<MarketJewel[]> => {
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
   const baseUrl =
-    typeof window !== 'undefined' && window.location.hostname === 'localhost'
-      ? ''
-      : 'https://www.pathofexile.com';
+    typeof window !== 'undefined' && window.location.hostname === 'localhost' ? '' : 'https://www.pathofexile.com';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json'
   };
-  if (poesessid) headers['X-Poe-Session'] = poesessid;
+  if (poesessid) {
+headers['X-Poe-Session'] = poesessid;
+}
 
   // Separate items with IDs (can validate) from those without (keep as-is)
   const withId = cachedJewels.filter((j) => j.id);
@@ -352,7 +356,9 @@ export const pruneStaleMarketJewels = async (
   const byConqueror = new Map<string, MarketJewel[]>();
   for (const j of withId) {
     const key = j.worshipper.toLowerCase();
-    if (!byConqueror.has(key)) byConqueror.set(key, []);
+    if (!byConqueror.has(key)) {
+byConqueror.set(key, []);
+}
     byConqueror.get(key)!.push(j);
   }
 
@@ -407,15 +413,15 @@ export const fetchMarketJewels = async (
 
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
   const baseUrl =
-    typeof window !== 'undefined' && window.location.hostname === 'localhost'
-      ? ''
-      : 'https://www.pathofexile.com';
+    typeof window !== 'undefined' && window.location.hostname === 'localhost' ? '' : 'https://www.pathofexile.com';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json'
   };
-  if (poesessid) headers['X-Poe-Session'] = poesessid;
+  if (poesessid) {
+headers['X-Poe-Session'] = poesessid;
+}
 
   let totalFound = 0;
 
@@ -430,7 +436,9 @@ export const fetchMarketJewels = async (
 
     while (queue.length > 0) {
       const range = queue.shift();
-      if (!range) break;
+      if (!range) {
+break;
+}
 
       const payload: any = {
         query: {
@@ -503,7 +511,9 @@ export const fetchMarketJewels = async (
         }
       }
 
-      if (reachedCachedTimestamp) break;
+      if (reachedCachedTimestamp) {
+break;
+}
 
       await waitForRateLimit(firstPage.rl, 3000);
     }
@@ -526,15 +536,15 @@ export const openLiveSearch = async (
 ): Promise<() => void> => {
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
   const baseUrl =
-    typeof window !== 'undefined' && window.location.hostname === 'localhost'
-      ? ''
-      : 'https://www.pathofexile.com';
+    typeof window !== 'undefined' && window.location.hostname === 'localhost' ? '' : 'https://www.pathofexile.com';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json'
   };
-  if (poesessid) headers['X-Poe-Session'] = poesessid;
+  if (poesessid) {
+headers['X-Poe-Session'] = poesessid;
+}
 
   // No stat filter — matches all conquerors for this jewel type in one query
   const payload = {
@@ -586,7 +596,9 @@ export const openLiveSearch = async (
     } catch {
       return;
     }
-    if (!msg.new || msg.new.length === 0) return;
+    if (!msg.new || msg.new.length === 0) {
+return;
+}
 
     const chunk = msg.new.slice(0, MAX_FETCH_SIZE);
     const fetchUrl = `${baseUrl}/api/trade/fetch/${chunk.join(',')}?query=${queryId}`;
@@ -596,7 +608,9 @@ export const openLiveSearch = async (
     } catch {
       return;
     }
-    if (!fetchRes.ok) return;
+    if (!fetchRes.ok) {
+return;
+}
 
     const fetchData = await fetchRes.json();
     const jewels: MarketJewel[] = [];
@@ -607,22 +621,29 @@ export const openLiveSearch = async (
       let seed = 0;
       for (const mod of item.item?.explicitMods || []) {
         const match = mod.match(/(\d+)/);
-        if (match) { seed = parseInt(match[1]); break; }
+        if (match) {
+          seed = parseInt(match[1]);
+          break;
+        }
       }
-      if (seed <= 0) continue;
+      if (seed <= 0) {
+continue;
+}
 
-      const matched = knownConquerors.find(c => modText.includes(c));
-      if (!matched) continue;
+      const matched = knownConquerors.find((c) => modText.includes(c));
+      if (!matched) {
+continue;
+}
       const worshipper = matched.charAt(0).toUpperCase() + matched.slice(1);
 
-      const price = item.listing?.price
-        ? `${item.listing.price.amount} ${item.listing.price.currency}`
-        : '';
+      const price = item.listing?.price ? `${item.listing.price.amount} ${item.listing.price.currency}` : '';
       const listedAt = item.listing?.indexed || new Date().toISOString();
       jewels.push({ id: item.id, seed, worshipper, price, listedAt });
     }
 
-    if (jewels.length > 0) onJewels(jewels);
+    if (jewels.length > 0) {
+onJewels(jewels);
+}
   };
 
   return () => ws.close();

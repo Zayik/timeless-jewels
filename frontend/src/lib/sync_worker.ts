@@ -88,9 +88,13 @@ const obj = {
       searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
 
       let limit = 100;
-      if (maxLen - nLen >= 3) limit = 0;
-      else if (maxLen - nLen === 2) limit = 5;
-      else if (maxLen - nLen === 1) limit = 20;
+      if (maxLen - nLen >= 3) {
+limit = 0;
+} else if (maxLen - nLen === 2) {
+limit = 5;
+} else if (maxLen - nLen === 1) {
+limit = 20;
+}
 
       if (limit === 0) {
         delete searchGrouped[nLen];
@@ -130,22 +134,24 @@ const obj = {
       const socketId = parseInt(socketIdStr);
       console.log('socket id:', socketIdStr, 'socketSearchResult:', searchResult[socketId]);
       const socketSearchResult = searchResult[socketId];
-      if (!socketSearchResult) continue;
+      if (!socketSearchResult) {
+continue;
+}
 
-              const searchGrouped: { [key: number]: SearchWithSeed[] } = {};
-        
-        // Fast lookup maps
-        const seedToConq = new Map<number, string>();
-        const seedToPrice = new Map<number, string>();
-        args.seeds?.forEach((s, i) => {
-            seedToConq.set(s, args.conquerors[i]);
-            if (args.prices && args.prices[i]) {
-                seedToPrice.set(s, args.prices[i]);
-            }
-        });
+      const searchGrouped: { [key: number]: SearchWithSeed[] } = {};
 
-        Object.keys(socketSearchResult).forEach((seedStr) => {
-          const seed = parseInt(seedStr);
+      // Fast lookup maps
+      const seedToConq = new Map<number, string>();
+      const seedToPrice = new Map<number, string>();
+      args.seeds?.forEach((s, i) => {
+        seedToConq.set(s, args.conquerors[i]);
+        if (args.prices && args.prices[i]) {
+          seedToPrice.set(s, args.prices[i]);
+        }
+      });
+
+      Object.keys(socketSearchResult).forEach((seedStr) => {
+        const seed = parseInt(seedStr);
 
         let weight = 0;
 
@@ -199,9 +205,13 @@ const obj = {
         searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
 
         let limit = 100;
-        if (maxLen - nLen >= 3) limit = 0;
-        else if (maxLen - nLen === 2) limit = 5;
-        else if (maxLen - nLen === 1) limit = 20;
+        if (maxLen - nLen >= 3) {
+limit = 0;
+} else if (maxLen - nLen === 2) {
+limit = 5;
+} else if (maxLen - nLen === 1) {
+limit = 20;
+}
 
         if (limit === 0) {
           delete searchGrouped[nLen];
@@ -239,26 +249,28 @@ const obj = {
     for (const socketIdStr in searchResult) {
       const socketId = parseInt(socketIdStr);
       const socketSearchResult = searchResult[socketId];
-      if (!socketSearchResult) continue;
+      if (!socketSearchResult) {
+continue;
+}
 
-              const searchGrouped: { [key: number]: SearchWithSeed[] } = {};
-        
-        // Fast lookup maps
-        const seedToConq = new Map<number, string>();
-        const seedToPrice = new Map<number, string>();
-        const seedToListedAt = new Map<number, string>();
-        args.seeds.forEach((s, i) => {
-            seedToConq.set(s, args.conquerors[i]);
-            if (args.prices && args.prices[i]) {
-                seedToPrice.set(s, args.prices[i]);
-            }
-            if (args.listedAts && args.listedAts[i]) {
-                seedToListedAt.set(s, args.listedAts[i]);
-            }
-        });
+      const searchGrouped: { [key: number]: SearchWithSeed[] } = {};
 
-        Object.keys(socketSearchResult).forEach((seedStr) => {
-          const seed = parseInt(seedStr);
+      // Fast lookup maps
+      const seedToConq = new Map<number, string>();
+      const seedToPrice = new Map<number, string>();
+      const seedToListedAt = new Map<number, string>();
+      args.seeds.forEach((s, i) => {
+        seedToConq.set(s, args.conquerors[i]);
+        if (args.prices && args.prices[i]) {
+          seedToPrice.set(s, args.prices[i]);
+        }
+        if (args.listedAts && args.listedAts[i]) {
+          seedToListedAt.set(s, args.listedAts[i]);
+        }
+      });
+
+      Object.keys(socketSearchResult).forEach((seedStr) => {
+        const seed = parseInt(seedStr);
         let weight = 0;
         const statCounts: Record<number, number> = {};
         const skills = Object.keys(socketSearchResult[seed]!).map((skillIDStr) => {
@@ -311,9 +323,13 @@ const obj = {
         searchGrouped[nLen] = searchGrouped[nLen].sort((a, b) => b.weight - a.weight);
 
         let limit = 100;
-        if (maxLen - nLen >= 3) limit = 0;
-        else if (maxLen - nLen === 2) limit = 5;
-        else if (maxLen - nLen === 1) limit = 20;
+        if (maxLen - nLen >= 3) {
+limit = 0;
+} else if (maxLen - nLen === 2) {
+limit = 5;
+} else if (maxLen - nLen === 1) {
+limit = 20;
+}
 
         if (limit === 0) {
           delete searchGrouped[nLen];

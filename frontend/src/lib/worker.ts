@@ -36,23 +36,32 @@ function mergeAndTrimSocketResults(
 ): void {
   for (const socketIdStr in source) {
     const socketId = parseInt(socketIdStr);
-    if (!target[socketId]) target[socketId] = { grouped: {}, raw: [] };
+    if (!target[socketId]) {
+target[socketId] = { grouped: {}, raw: [] };
+}
     const tGrouped = target[socketId].grouped;
     const sGrouped = source[socketId].grouped;
     for (const key of Object.keys(sGrouped)) {
       const n = parseInt(key);
       tGrouped[n] = [...(tGrouped[n] || []), ...sGrouped[n]];
     }
-    const maxLen = Math.max(0, ...Object.keys(tGrouped).map(x => parseInt(x) || 0));
+    const maxLen = Math.max(0, ...Object.keys(tGrouped).map((x) => parseInt(x) || 0));
     for (const key of Object.keys(tGrouped)) {
       const n = parseInt(key);
       tGrouped[n] = tGrouped[n].sort((a, b) => b.weight - a.weight);
       let limit = 100;
-      if (maxLen - n >= 3) limit = 0;
-      else if (maxLen - n === 2) limit = 5;
-      else if (maxLen - n === 1) limit = 20;
-      if (limit === 0) delete tGrouped[n];
-      else tGrouped[n] = tGrouped[n].slice(0, limit);
+      if (maxLen - n >= 3) {
+limit = 0;
+} else if (maxLen - n === 2) {
+limit = 5;
+} else if (maxLen - n === 1) {
+limit = 20;
+}
+      if (limit === 0) {
+delete tGrouped[n];
+} else {
+tGrouped[n] = tGrouped[n].slice(0, limit);
+}
     }
     target[socketId].raw = Object.values(target[socketId].grouped)
       .flat()
@@ -62,23 +71,19 @@ function mergeAndTrimSocketResults(
 
 export const syncWrap = browser
   ? {
-      boot: (wasm: ArrayBuffer) => {
-        return Promise.all(pool.map((w) => w.syncWrap.boot(wasm)));
-      },
+      boot: (wasm: ArrayBuffer) => Promise.all(pool.map((w) => w.syncWrap.boot(wasm))),
       search: async (args: ReverseSearchConfig, callback: (seed: number) => Promise<void>): Promise<SearchResults> => {
         const numWorkers = pool.length;
 
         // We run the searches in parallel
-        const promises = pool.map(async (workerData, index) => {
-          return await workerData.syncWrap.search(
+        const promises = pool.map(async (workerData, index) => await workerData.syncWrap.search(
             {
               ...args,
               workerId: index,
               numWorkers: numWorkers
             },
             callback
-          );
-        });
+          ));
 
         const results = await Promise.all(promises);
 
@@ -99,9 +104,13 @@ export const syncWrap = browser
           searchGrouped[numKey] = searchGrouped[numKey].sort((a, b) => b.weight - a.weight);
 
           let limit = 100;
-          if (maxLen - numKey >= 3) limit = 0;
-          else if (maxLen - numKey === 2) limit = 5;
-          else if (maxLen - numKey === 1) limit = 20;
+          if (maxLen - numKey >= 3) {
+limit = 0;
+} else if (maxLen - numKey === 2) {
+limit = 5;
+} else if (maxLen - numKey === 1) {
+limit = 20;
+}
 
           if (limit === 0) {
             delete searchGrouped[numKey];
@@ -124,16 +133,14 @@ export const syncWrap = browser
         const numWorkers = pool.length;
 
         // We run the searches in parallel
-        const promises = pool.map(async (workerData, index) => {
-          return await workerData.syncWrap.massSearch(
+        const promises = pool.map(async (workerData, index) => await workerData.syncWrap.massSearch(
             {
               ...args,
               workerId: index,
               numWorkers: numWorkers
             },
             callback
-          );
-        });
+          ));
 
         const results = await Promise.all(promises);
 
@@ -168,9 +175,13 @@ export const syncWrap = browser
             );
 
             let limit = 100;
-            if (maxLen - numKey >= 3) limit = 0;
-            else if (maxLen - numKey === 2) limit = 5;
-            else if (maxLen - numKey === 1) limit = 20;
+            if (maxLen - numKey >= 3) {
+limit = 0;
+} else if (maxLen - numKey === 2) {
+limit = 5;
+} else if (maxLen - numKey === 1) {
+limit = 20;
+}
 
             if (limit === 0) {
               delete massResults[socketId].grouped[numKey];
@@ -196,7 +207,9 @@ export const syncWrap = browser
         const promises = pool.map(async (workerData, index) => {
           const start = index * chunkSize;
           const end = Math.min(start + chunkSize, args.seeds.length);
-          if (start >= args.seeds.length) return { resultsBySocket: {} };
+          if (start >= args.seeds.length) {
+return { resultsBySocket: {} };
+}
           return await workerData.syncWrap.targetedMassSearch(
             {
               ...args,
@@ -238,9 +251,13 @@ export const syncWrap = browser
             );
 
             let limit = 100;
-            if (maxLen - numKey >= 3) limit = 0;
-            else if (maxLen - numKey === 2) limit = 5;
-            else if (maxLen - numKey === 1) limit = 20;
+            if (maxLen - numKey >= 3) {
+limit = 0;
+} else if (maxLen - numKey === 2) {
+limit = 5;
+} else if (maxLen - numKey === 1) {
+limit = 20;
+}
 
             if (limit === 0) {
               delete massResults[socketId].grouped[numKey];
@@ -262,9 +279,7 @@ export const syncWrap = browser
           const socketId = parseInt(socketIdStr);
           const src = a.resultsBySocket[socketId];
           merged[socketId] = {
-            grouped: Object.fromEntries(
-              Object.entries(src.grouped).map(([k, v]) => [k, [...v]])
-            ),
+            grouped: Object.fromEntries(Object.entries(src.grouped).map(([k, v]) => [k, [...v]])),
             raw: [...src.raw]
           };
         }
