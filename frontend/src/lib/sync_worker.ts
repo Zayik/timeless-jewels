@@ -89,12 +89,12 @@ const obj = {
 
       let limit = 100;
       if (maxLen - nLen >= 3) {
-limit = 0;
-} else if (maxLen - nLen === 2) {
-limit = 5;
-} else if (maxLen - nLen === 1) {
-limit = 20;
-}
+        limit = 0;
+      } else if (maxLen - nLen === 2) {
+        limit = 5;
+      } else if (maxLen - nLen === 1) {
+        limit = 20;
+      }
 
       if (limit === 0) {
         delete searchGrouped[nLen];
@@ -135,8 +135,8 @@ limit = 20;
       console.log('socket id:', socketIdStr, 'socketSearchResult:', searchResult[socketId]);
       const socketSearchResult = searchResult[socketId];
       if (!socketSearchResult) {
-continue;
-}
+        continue;
+      }
 
       const searchGrouped: { [key: number]: SearchWithSeed[] } = {};
 
@@ -206,12 +206,12 @@ continue;
 
         let limit = 100;
         if (maxLen - nLen >= 3) {
-limit = 0;
-} else if (maxLen - nLen === 2) {
-limit = 5;
-} else if (maxLen - nLen === 1) {
-limit = 20;
-}
+          limit = 0;
+        } else if (maxLen - nLen === 2) {
+          limit = 5;
+        } else if (maxLen - nLen === 1) {
+          limit = 20;
+        }
 
         if (limit === 0) {
           delete searchGrouped[nLen];
@@ -250,8 +250,8 @@ limit = 20;
       const socketId = parseInt(socketIdStr);
       const socketSearchResult = searchResult[socketId];
       if (!socketSearchResult) {
-continue;
-}
+        continue;
+      }
 
       const searchGrouped: { [key: number]: SearchWithSeed[] } = {};
 
@@ -324,12 +324,12 @@ continue;
 
         let limit = 100;
         if (maxLen - nLen >= 3) {
-limit = 0;
-} else if (maxLen - nLen === 2) {
-limit = 5;
-} else if (maxLen - nLen === 1) {
-limit = 20;
-}
+          limit = 0;
+        } else if (maxLen - nLen === 2) {
+          limit = 5;
+        } else if (maxLen - nLen === 1) {
+          limit = 20;
+        }
 
         if (limit === 0) {
           delete searchGrouped[nLen];

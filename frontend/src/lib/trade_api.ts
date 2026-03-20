@@ -56,8 +56,8 @@ const extractRateLimitHeaders = (res: Response): RateLimitHeaders => ({
  */
 const computeWaitFromPair = (stateStr: string | null, limitStr: string | null): number => {
   if (!stateStr || !limitStr) {
-return 0;
-}
+    return 0;
+  }
   const stateWindows = stateStr.split(',').map((w) => w.split(':').map(Number));
   const limitWindows = limitStr.split(',').map((w) => w.split(':').map(Number));
   let waitMs = 0;
@@ -107,7 +107,7 @@ const searchTradePage = async (
   onProgress: (msg: string) => void,
   rateLimitLabel: string
 ): Promise<SearchPageResult> => {
-  while (true) {
+  for (;;) {
     let searchRes: Response;
     try {
       const searchUrl = `${baseUrl}/api/trade/search/${league}${offset > 0 ? `?offset=${offset}` : ''}`;
@@ -163,8 +163,8 @@ const safeFetchJewelDetails = async (
 
   for (let i = 0; i < hashes.length; i += MAX_FETCH_SIZE) {
     if (reachedOldItem) {
-break;
-}
+      break;
+    }
 
     const chunk = hashes.slice(i, i + MAX_FETCH_SIZE);
     const fetchUrl = `${baseUrl}/api/trade/fetch/${chunk.join(',')}?query=${queryId}`;
@@ -230,8 +230,8 @@ break;
 /** Group sorted seed values into contiguous clusters to minimise search queries. */
 const clusterSeeds = (seeds: number[]): Array<{ min: number; max: number }> => {
   if (seeds.length === 0) {
-return [];
-}
+    return [];
+  }
   const sorted = [...seeds].sort((a, b) => a - b);
   const clusters: Array<{ min: number; max: number }> = [];
   let clusterMin = sorted[0];
@@ -307,8 +307,8 @@ const fetchActiveHashesForRange = async (
         `Rate limited during prune scan page ${pageIndex + 1} (${conqueror} ${range.min}-${range.max}).`
       );
       if (page.hashes.length === 0) {
-break;
-}
+        break;
+      }
       page.hashes.forEach((h) => active.add(h));
       await waitForRateLimit(page.rl, 3000);
     }
@@ -340,8 +340,8 @@ export const pruneStaleMarketJewels = async (
     Accept: 'application/json'
   };
   if (poesessid) {
-headers['X-Poe-Session'] = poesessid;
-}
+    headers['X-Poe-Session'] = poesessid;
+  }
 
   // Separate items with IDs (can validate) from those without (keep as-is)
   const withId = cachedJewels.filter((j) => j.id);
@@ -357,8 +357,8 @@ headers['X-Poe-Session'] = poesessid;
   for (const j of withId) {
     const key = j.worshipper.toLowerCase();
     if (!byConqueror.has(key)) {
-byConqueror.set(key, []);
-}
+      byConqueror.set(key, []);
+    }
     byConqueror.get(key)!.push(j);
   }
 
@@ -420,8 +420,8 @@ export const fetchMarketJewels = async (
     Accept: 'application/json'
   };
   if (poesessid) {
-headers['X-Poe-Session'] = poesessid;
-}
+    headers['X-Poe-Session'] = poesessid;
+  }
 
   let totalFound = 0;
 
@@ -437,32 +437,34 @@ headers['X-Poe-Session'] = poesessid;
     while (queue.length > 0) {
       const range = queue.shift();
       if (!range) {
-break;
-}
+        break;
+      }
 
-      const payload: any = {
-        query: {
-          status: { option: 'any' },
-          name: baseName,
-          type: 'Timeless Jewel',
-          stats: [
-            {
-              type: 'and',
-              filters: [
-                {
-                  id: `explicit.pseudo_timeless_jewel_${conqueror}`,
-                  value: { min: range.min, max: range.max }
-                }
-              ]
-            }
-          ]
-        },
-        ...(isIncremental ? { sort: { indexed: 'desc' } } : {})
+      const query: Record<string, unknown> = {
+        status: { option: 'any' },
+        name: baseName,
+        type: 'Timeless Jewel',
+        stats: [
+          {
+            type: 'and',
+            filters: [
+              {
+                id: `explicit.pseudo_timeless_jewel_${conqueror}`,
+                value: { min: range.min, max: range.max }
+              }
+            ]
+          }
+        ]
       };
 
       if (isIncremental && indexedWindow) {
-        payload.query.filters = { trade_filters: { filters: { indexed: { option: indexedWindow } } } };
+        query.filters = { trade_filters: { filters: { indexed: { option: indexedWindow } } } };
       }
+
+      const payload: Record<string, unknown> = {
+        query,
+        ...(isIncremental ? { sort: { indexed: 'desc' } } : {})
+      };
 
       const firstPage = await searchTradePage(
         baseUrl,
@@ -512,8 +514,8 @@ break;
       }
 
       if (reachedCachedTimestamp) {
-break;
-}
+        break;
+      }
 
       await waitForRateLimit(firstPage.rl, 3000);
     }
@@ -543,8 +545,8 @@ export const openLiveSearch = async (
     Accept: 'application/json'
   };
   if (poesessid) {
-headers['X-Poe-Session'] = poesessid;
-}
+    headers['X-Poe-Session'] = poesessid;
+  }
 
   // No stat filter — matches all conquerors for this jewel type in one query
   const payload = {
@@ -597,8 +599,8 @@ headers['X-Poe-Session'] = poesessid;
       return;
     }
     if (!msg.new || msg.new.length === 0) {
-return;
-}
+      return;
+    }
 
     const chunk = msg.new.slice(0, MAX_FETCH_SIZE);
     const fetchUrl = `${baseUrl}/api/trade/fetch/${chunk.join(',')}?query=${queryId}`;
@@ -609,8 +611,8 @@ return;
       return;
     }
     if (!fetchRes.ok) {
-return;
-}
+      return;
+    }
 
     const fetchData = await fetchRes.json();
     const jewels: MarketJewel[] = [];
@@ -627,13 +629,13 @@ return;
         }
       }
       if (seed <= 0) {
-continue;
-}
+        continue;
+      }
 
       const matched = knownConquerors.find((c) => modText.includes(c));
       if (!matched) {
-continue;
-}
+        continue;
+      }
       const worshipper = matched.charAt(0).toUpperCase() + matched.slice(1);
 
       const price = item.listing?.price ? `${item.listing.price.amount} ${item.listing.price.currency}` : '';
@@ -642,8 +644,8 @@ continue;
     }
 
     if (jewels.length > 0) {
-onJewels(jewels);
-}
+      onJewels(jewels);
+    }
   };
 
   return () => ws.close();

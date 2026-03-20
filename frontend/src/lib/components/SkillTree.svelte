@@ -29,9 +29,15 @@
   export let disabled: number[] = [];
   export let highlightJewels = false;
 
+  let scaling = 10;
+  let offsetX = 0;
+  let offsetY = 0;
+
   export const centerOnNode = (nodeId: number) => {
     const node = skillTree.nodes[nodeId];
-    if (!node || !window) return;
+    if (!node || !window) {
+      return;
+    }
     const pos = calculateNodePos(node, 0, 0, 1);
     offsetX = (window.innerWidth / 2) * scaling - pos.x;
     offsetY = (window.innerHeight / 2) * scaling - pos.y;
@@ -49,11 +55,6 @@
 
   const titleFont = '25px Roboto Mono';
   const statsFont = '17px Roboto Mono';
-
-  let scaling = 10;
-
-  let offsetX = 0;
-  let offsetY = 0;
 
   $: jewelRadius = baseJewelRadius / scaling;
 

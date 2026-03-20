@@ -166,6 +166,9 @@
   let currentSeed = 0;
   let seedsProcessed = 0;
   let activeSocketsCount = 1;
+  let searchJewel = 1;
+  let searchConqueror = '';
+  let massSearchResults: MassSearchResults | undefined;
 
   const totalSeeds = () => {
     const jewelId = searchJewel || selectedJewel?.value || 0;
@@ -183,8 +186,6 @@
   };
 
   let searchResults: SearchResults;
-  let searchJewel = 1;
-  let searchConqueror = '';
   const search = () => {
     if (!circledNode) {
       return;
@@ -223,7 +224,6 @@
         results = true;
       });
   };
-  let massSearchResults: MassSearchResults | undefined;
   const massSearch = () => { 
     if (!selectedJewel || !selectedConqueror) {
       return;
@@ -256,7 +256,7 @@
     };
 
     activeSocketsCount = Object.keys(socketToNodes).length;
-    seedsProcessed = 0; syncWrap.massSearch(query, proxy((s) => {
+    seedsProcessed = 0; syncWrap.massSearch(query, proxy(() => {
    seedsProcessed += (100 * activeSocketsCount); 
   })).then((result) => {
       massSearchResults = result; console.log('MAIN THREAD massSearch result: ', JSON.stringify(result, null, 2));
@@ -518,9 +518,11 @@
     const responseJson = await response.json();
     
     // Sort leagues by start date descending so the newest leagues are first
-    const sortedLeagues = responseJson.sort((a: any, b: any) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
+    const sortedLeagues = (responseJson as { start_date: string; name: string }[]).sort(
+      (a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
+    );
     
-    leagues = sortedLeagues.map((l: { name: string }) => ({ value: l.name, label: l.name }));
+    leagues = sortedLeagues.map((l) => ({ value: l.name, label: l.name }));
     
     // The main active challenge league is the newest one that isn't HC, SSF, or Ruthless
     const defaultLeague = leagues.find((l) => !l.value.includes('Ruthless') && !l.value.includes('Self-Found') && !l.value.includes('Hardcore') && !l.value.includes('Standard')) 
@@ -626,8 +628,8 @@
         lastSyncStr
       );
       cacheTime = getCacheTime(selectedJewel.value, league?.value || 'Standard');
-    } catch (e: any) {
-      alert(e.message || 'Failed to sync');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to sync');
     } finally {
       fetchingMarket = false;
       marketProgress = '';
@@ -662,8 +664,8 @@
       setCachedJewels(selectedJewel.value, league?.value || 'Standard', pruned);
       cachedJewels = pruned;
       cacheTime = getCacheTime(selectedJewel.value, league?.value || 'Standard');
-    } catch (e: any) {
-      alert(e.message || 'Failed to prune cache');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to prune cache');
     } finally {
       fetchingMarket = false;
       marketProgress = '';
@@ -717,23 +719,23 @@
           .filter(Boolean)
           .map(n => n.Index) };
 
-    const handleNewJewels = async (jewels: MarketJewel[]) => {
+    const handleNewJewels = async (newJewels: MarketJewel[]) => {
       const jewelMap = new Map(cachedJewels.filter(j => j.id).map(j => [j.id, j]));
-      for (const j of jewels) {
-   if (j.id) {
-  jewelMap.set(j.id, j);
-  } 
-  }
+      for (const j of newJewels) {
+        if (j.id) {
+          jewelMap.set(j.id, j);
+        }
+      }
       cachedJewels = [...jewelMap.values(), ...cachedJewels.filter(j => !j.id)];
       setCachedJewels(selectedJewel.value, league?.value || 'Standard', cachedJewels);
 
       const partial = await syncWrap.targetedMassSearch(
         {
           jewel: selectedJewel.value,
-          seeds: jewels.map(j => j.seed),
-          conquerors: jewels.map(j => j.worshipper),
-          prices: jewels.map(j => j.price),
-          listedAts: jewels.map(j => j.listedAt),
+          seeds: newJewels.map(j => j.seed),
+          conquerors: newJewels.map(j => j.worshipper),
+          prices: newJewels.map(j => j.price),
+          listedAts: newJewels.map(j => j.listedAt),
           socketToNodes,
           stats: Object.values(selectedStats).filter(s => s.weight > 0),
           minTotalWeight
@@ -756,8 +758,8 @@
   }
       );
       liveFeeds = [cleanup];
-    } catch (e: any) {
-      alert(e.message || 'Failed to start live feed');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to start live feed');
       liveFeedAllActive = false;
       liveFeedSocketActive = false;
     }
@@ -789,7 +791,7 @@
     activeSocketsCount = allSockets.length;
 
     const seeds = filteredMarketJewels.map(j => j.seed);
-    const conquerors = filteredMarketJewels.map(j => j.worshipper);
+    const marketConquerors = filteredMarketJewels.map(j => j.worshipper);
     const prices = filteredMarketJewels.map(j => j.price);
 
     seedsProcessed = 0;
@@ -798,7 +800,7 @@
       {
         jewel: selectedJewel.value,
         seeds,
-        conquerors,
+        conquerors: marketConquerors,
         prices,
         socketToNodes: reqNodes,
         stats: Object.values(selectedStats).filter((s) => s.weight > 0),
@@ -1377,8 +1379,8 @@
 }}>
                           {skillTree.nodes[parseInt(socketId)]?.name || 'Jewel Socket'} ({socketId})
                       </h4>
-                      <SearchResults searchResults={{ grouped: { [matchCount]: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }, raw: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }} highlight={(seed, passives) => {
- circledNode = parseInt(socketId); highlight(seed, passives); skillTreeComponent.centerOnNode(parseInt(socketId)); 
+                      <SearchResults searchResults={{ grouped: { [matchCount]: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }, raw: massSearchResults.resultsBySocket[socketId].grouped[matchCount] }} highlight={(resultSeed, passives) => {
+ circledNode = parseInt(socketId); highlight(resultSeed, passives); skillTreeComponent.centerOnNode(parseInt(socketId));
 }} groupResults={true} jewel={searchJewel} conqueror={searchConqueror} platform={platform.value} league={league.value} />
                     </div>
                   {/if}

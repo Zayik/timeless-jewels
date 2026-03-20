@@ -411,7 +411,6 @@ const tradeStatNames: { [key: number]: { [key: string]: string } } = {
 export const constructQuery = (jewel: number, conqueror: string, result: SearchWithSeed[]) => {
   const max_filter_length = 45;
   const max_filters = 4;
-  const max_query_length = max_filter_length * max_filters;
   let final_query = [];
 
   if (result.length === 0) {
@@ -424,19 +423,17 @@ export const constructQuery = (jewel: number, conqueror: string, result: SearchW
     chunks.push(result.slice(i, i + max_filter_length));
   }
 
-  final_query = chunks.map((chunk) => {
-    return {
-      type: 'count',
-      value: { min: 1 },
-      filters: chunk.map((r) => ({
-        id: tradeStatNames[jewel][conqueror],
-        value: {
-          min: r.seed,
-          max: r.seed
-        }
-      }))
-    };
-  });
+  final_query = chunks.map((chunk) => ({
+    type: 'count',
+    value: { min: 1 },
+    filters: chunk.map((r) => ({
+      id: tradeStatNames[jewel][conqueror],
+      value: {
+        min: r.seed,
+        max: r.seed
+      }
+    }))
+  }));
 
   return {
     query: {
