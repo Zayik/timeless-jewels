@@ -32,6 +32,8 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          BASE_PATH: '/timeless-jewels'
         run: |
           pnpm install
           pnpm run build
