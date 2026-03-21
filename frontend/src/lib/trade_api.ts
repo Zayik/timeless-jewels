@@ -1,6 +1,24 @@
 import type { MarketJewel } from './market_cache';
 import { data } from './types';
 
+// In dev, the Vite proxy (vite.config.js) handles /api/trade/* — no base needed.
+// In production, requests go through the Cloudflare Worker set via VITE_PROXY_BASE_URL.
+const isLocalhost = () => typeof window !== 'undefined' && window.location.hostname === 'localhost';
+
+const getHttpBase = (): string => {
+  if (isLocalhost()) return '';
+  return import.meta.env.VITE_PROXY_BASE_URL ?? 'https://www.pathofexile.com';
+};
+
+const getLiveWsUrl = (league: string, queryId: string): string => {
+  if (isLocalhost()) {
+    return `ws://${window.location.host}/api/trade/live/${league}/${queryId}`;
+  }
+  const base = import.meta.env.VITE_PROXY_BASE_URL ?? 'https://www.pathofexile.com';
+  const wsBase = base.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
+  return `${wsBase}/api/trade/live/${league}/${queryId}`;
+};
+
 const MAX_FETCH_SIZE = 10;
 const SEARCH_PAGE_SIZE = 100;
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
@@ -117,7 +135,7 @@ const searchTradePage = async (
         body: JSON.stringify(payload)
       });
     } catch (e) {
-      throw new Error('Network error. Please ensure you have a CORS Unblock extension enabled.');
+      throw new Error('Network error contacting the trade API. Please try again.');
     }
 
     if (searchRes.status === 403) {
@@ -333,7 +351,7 @@ export const pruneStaleMarketJewels = async (
 ): Promise<MarketJewel[]> => {
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
   const baseUrl =
-    typeof window !== 'undefined' && window.location.hostname === 'localhost' ? '' : 'https://www.pathofexile.com';
+    getHttpBase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -413,7 +431,7 @@ export const fetchMarketJewels = async (
 
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
   const baseUrl =
-    typeof window !== 'undefined' && window.location.hostname === 'localhost' ? '' : 'https://www.pathofexile.com';
+    getHttpBase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -538,7 +556,7 @@ export const openLiveSearch = async (
 ): Promise<() => void> => {
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
   const baseUrl =
-    typeof window !== 'undefined' && window.location.hostname === 'localhost' ? '' : 'https://www.pathofexile.com';
+    getHttpBase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -566,29 +584,26 @@ export const openLiveSearch = async (
       body: JSON.stringify(payload)
     });
   } catch {
-    throw new Error('Network error starting live search. Ensure your CORS Unblock extension is active.');
+    throw new Error('Network error starting live search. Please try again.');
   }
 
   if (!searchRes.ok) {
-    throw new Error(`Trade search failed (${searchRes.status}). Check your POESESSID and CORS extension.`);
+    throw new Error(`Trade search failed (${searchRes.status}). Check your POESESSID.`);
   }
 
   const { id: queryId } = await searchRes.json();
   onStatus(`Live feed ready for all ${baseName} conquerors (${league})`);
 
   // On localhost the Vite proxy handles the WebSocket (ws: true in vite.config.js).
-  // In production, connect directly to pathofexile.com.
-  const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-  const wsUrl = isLocal
-    ? `ws://${window.location.host}/api/trade/live/${league}/${queryId}`
-    : `wss://www.pathofexile.com/api/trade/live/${league}/${queryId}`;
+  // In production, connects through the Cloudflare Worker (VITE_PROXY_BASE_URL).
+  const wsUrl = getLiveWsUrl(league, queryId);
   const ws = new WebSocket(wsUrl);
 
   // Build lowercase conqueror name list for detection from mod text
   const knownConquerors = JEWEL_CONQUERORS[jewelId] || [];
 
   ws.onopen = () => onStatus(`Watching for new ${baseName} listings...`);
-  ws.onerror = () => onStatus('WebSocket error — check your CORS Unblock extension.');
+  ws.onerror = () => onStatus('WebSocket error — live feed could not connect.');
   ws.onclose = () => onStatus('Live feed closed.');
 
   ws.onmessage = async (event) => {

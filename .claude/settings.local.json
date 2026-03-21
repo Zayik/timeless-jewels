@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.poewiki.net)",
+      "WebFetch(domain:poe.ninja)",
+      "WebSearch",
+      "WebFetch(domain:www.pathofexile.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(find /d/GitHub/timeless-jewels -name *.worker.ts -o -name *worker*.ts)",
+      "Bash(find /d/GitHub/timeless-jewels -name *.svelte.config* -o -name svelte.config*)"
+    ]
+  }
+}

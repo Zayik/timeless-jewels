@@ -34,6 +34,7 @@ jobs:
         working-directory: frontend
         env:
           BASE_PATH: '/timeless-jewels'
+          VITE_PROXY_BASE_URL: ${{ secrets.VITE_PROXY_BASE_URL }}
         run: |
           pnpm install
           pnpm run build
