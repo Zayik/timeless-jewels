@@ -596,8 +596,11 @@ export const openLiveSearch = async (
 
   // On localhost the Vite proxy handles the WebSocket (ws: true in vite.config.js).
   // In production, connects through the Cloudflare Worker (VITE_PROXY_BASE_URL).
+  // Browser WebSocket API doesn't support custom headers, so pass the session as a
+  // query param; the worker reads it and forwards it as the POESESSID cookie to PoE.
   const wsUrl = getLiveWsUrl(league, queryId);
-  const ws = new WebSocket(wsUrl);
+  const wsUrlWithSession = poesessid ? `${wsUrl}?session=${encodeURIComponent(poesessid)}` : wsUrl;
+  const ws = new WebSocket(wsUrlWithSession);
 
   // Build lowercase conqueror name list for detection from mod text
   const knownConquerors = JEWEL_CONQUERORS[jewelId] || [];

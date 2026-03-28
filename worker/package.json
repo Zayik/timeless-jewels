@@ -4,10 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test:ws": "node test-ws.mjs",
+    "test:ws:prod": "WORKER_URL=https://timeless-jewels-proxy.davidleeanderson1991.workers.dev node test-ws.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241004.0",
     "wrangler": "^3.78.12"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   }
 }

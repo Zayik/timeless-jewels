@@ -8,7 +8,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(find /d/GitHub/timeless-jewels -name *.worker.ts -o -name *worker*.ts)",
-      "Bash(find /d/GitHub/timeless-jewels -name *.svelte.config* -o -name svelte.config*)"
+      "Bash(find /d/GitHub/timeless-jewels -name *.svelte.config* -o -name svelte.config*)",
+      "Bash(npm install:*)"
     ]
   }
 }
