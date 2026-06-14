@@ -24,7 +24,7 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(0),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -33,7 +33,7 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   411, // Instability (maximum_power_charges742)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(67),
-				StatRolls:             map[uint32]int32{0: 8, 1: 22},
+				StatRolls:             data.StatRolls{8, 22},
 			},
 		},
 		{
@@ -42,7 +42,7 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   519, // Intelligence (intelligence879)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(38),
-				StatRolls:             map[uint32]int32{0: 12},
+				StatRolls:             data.StatRolls{12},
 			},
 		},
 		{
@@ -51,7 +51,7 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   1190, // Attack Damage and Attack Speed with Shield (damage_while_using_shield1913)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(21),
-				StatRolls:             map[uint32]int32{0: 3},
+				StatRolls:             data.StatRolls{3},
 			},
 		},
 		{
@@ -60,19 +60,19 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   88, // Eagle Eye (eagle_eye199)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(77),
-				StatRolls:             map[uint32]int32{},
+				StatRolls:             data.StatRolls{},
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(14),
-						StatRolls:                map[uint32]int32{0: 6},
+						StatRolls:                data.StatRolls{6},
 					},
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(23),
-						StatRolls:                map[uint32]int32{0: 5},
+						StatRolls:                data.StatRolls{5},
 					},
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(36),
-						StatRolls:                map[uint32]int32{0: 11},
+						StatRolls:                data.StatRolls{11},
 					},
 				},
 			},
@@ -83,7 +83,7 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(1),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -92,7 +92,7 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(2),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -101,7 +101,7 @@ func TestGloriousVanity(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(3),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 	}
@@ -130,7 +130,7 @@ func TestLethalPride(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(78),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -141,7 +141,7 @@ func TestLethalPride(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(42),
-						StatRolls:                map[uint32]int32{0: 20},
+						StatRolls:                data.StatRolls{20},
 					},
 				},
 			},
@@ -154,7 +154,7 @@ func TestLethalPride(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(39),
-						StatRolls:                map[uint32]int32{0: 4},
+						StatRolls:                data.StatRolls{4},
 					},
 				},
 			},
@@ -167,7 +167,7 @@ func TestLethalPride(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(39),
-						StatRolls:                map[uint32]int32{0: 4},
+						StatRolls:                data.StatRolls{4},
 					},
 				},
 			},
@@ -180,7 +180,7 @@ func TestLethalPride(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(57),
-						StatRolls:                map[uint32]int32{0: 12},
+						StatRolls:                data.StatRolls{12},
 					},
 				},
 			},
@@ -191,7 +191,7 @@ func TestLethalPride(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(79),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -200,7 +200,7 @@ func TestLethalPride(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(80),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -209,7 +209,7 @@ func TestLethalPride(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(81),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 	}
@@ -238,7 +238,7 @@ func TestBrutalRestraint(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(82),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -249,7 +249,7 @@ func TestBrutalRestraint(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(70),
-						StatRolls:                map[uint32]int32{0: 10},
+						StatRolls:                data.StatRolls{10},
 					},
 				},
 			},
@@ -262,7 +262,7 @@ func TestBrutalRestraint(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(66),
-						StatRolls:                map[uint32]int32{0: 4},
+						StatRolls:                data.StatRolls{4},
 					},
 				},
 			},
@@ -275,7 +275,7 @@ func TestBrutalRestraint(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(66),
-						StatRolls:                map[uint32]int32{0: 4},
+						StatRolls:                data.StatRolls{4},
 					},
 				},
 			},
@@ -288,7 +288,7 @@ func TestBrutalRestraint(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(76),
-						StatRolls:                map[uint32]int32{0: 20},
+						StatRolls:                data.StatRolls{20},
 					},
 				},
 			},
@@ -299,7 +299,7 @@ func TestBrutalRestraint(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(83),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -308,7 +308,7 @@ func TestBrutalRestraint(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(84),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -317,7 +317,7 @@ func TestBrutalRestraint(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(85),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 	}
@@ -346,7 +346,7 @@ func TestMilitantFaith(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(86),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -357,7 +357,7 @@ func TestMilitantFaith(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(93),
-						StatRolls:                map[uint32]int32{0: 5},
+						StatRolls:                data.StatRolls{5},
 					},
 				},
 			},
@@ -370,7 +370,7 @@ func TestMilitantFaith(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(92),
-						StatRolls:                map[uint32]int32{0: 5},
+						StatRolls:                data.StatRolls{5},
 					},
 				},
 			},
@@ -383,7 +383,7 @@ func TestMilitantFaith(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(92),
-						StatRolls:                map[uint32]int32{0: 5},
+						StatRolls:                data.StatRolls{5},
 					},
 				},
 			},
@@ -396,7 +396,7 @@ func TestMilitantFaith(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(93),
-						StatRolls:                map[uint32]int32{0: 5},
+						StatRolls:                data.StatRolls{5},
 					},
 				},
 			},
@@ -407,7 +407,7 @@ func TestMilitantFaith(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(87),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -416,7 +416,7 @@ func TestMilitantFaith(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(88),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -425,7 +425,7 @@ func TestMilitantFaith(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(89),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 	}
@@ -454,7 +454,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(105),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -463,7 +463,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   411, // Instability (maximum_power_charges742)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(123),
-				StatRolls:             map[uint32]int32{0: 30},
+				StatRolls:             data.StatRolls{30},
 			},
 		},
 		{
@@ -472,7 +472,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   519, // Intelligence (intelligence879)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(109),
-				StatRolls:             map[uint32]int32{},
+				StatRolls:             data.StatRolls{},
 			},
 		},
 		{
@@ -481,7 +481,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   1190, // Attack Damage and Attack Speed with Shield (damage_while_using_shield1913)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(109),
-				StatRolls:             map[uint32]int32{},
+				StatRolls:             data.StatRolls{},
 			},
 		},
 		{
@@ -490,7 +490,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   88, // Eagle Eye (eagle_eye199)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(137),
-				StatRolls:             map[uint32]int32{0: 80},
+				StatRolls:             data.StatRolls{80},
 			},
 		},
 		{
@@ -499,7 +499,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(106),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -508,7 +508,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(107),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -517,7 +517,7 @@ func TestElegantHubris(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone)
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(108),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 	}
@@ -546,7 +546,7 @@ func TestHeroicTragedy(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone) → Black Scythe Training
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(179),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -555,7 +555,7 @@ func TestHeroicTragedy(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone) → Celestial Mathematics
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(180),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -564,7 +564,7 @@ func TestHeroicTragedy(t *testing.T) {
 			passive:   2286, // Supreme Ego (keystone) → The Unbreaking Circle
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(181),
-				StatRolls:             map[uint32]int32{0: 1},
+				StatRolls:             data.StatRolls{1},
 			},
 		},
 		{
@@ -573,7 +573,7 @@ func TestHeroicTragedy(t *testing.T) {
 			passive:   88, // Eagle Eye (notable) → Pure Faith
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(171),
-				StatRolls:             map[uint32]int32{0: 12, 1: 8},
+				StatRolls:             data.StatRolls{12, 8},
 			},
 		},
 		{
@@ -582,7 +582,7 @@ func TestHeroicTragedy(t *testing.T) {
 			passive:   411, // Instability (notable) → Mage's Ward
 			result: data.AlternatePassiveSkillInformation{
 				AlternatePassiveSkill: data.GetAlternatePassiveSkillByIndex(168),
-				StatRolls:             map[uint32]int32{0: 10, 1: 5},
+				StatRolls:             data.StatRolls{10, 5},
 			},
 		},
 		{
@@ -593,7 +593,7 @@ func TestHeroicTragedy(t *testing.T) {
 				AlternatePassiveAdditionInformations: []data.AlternatePassiveAdditionInformation{
 					{
 						AlternatePassiveAddition: data.GetAlternatePassiveAdditionByIndex(94),
-						StatRolls:                map[uint32]int32{0: 2},
+						StatRolls:                data.StatRolls{2},
 					},
 				},
 			},
