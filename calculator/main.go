@@ -7,6 +7,12 @@ import (
 
 type UpdateFunc func(seed uint32)
 
+// calculationCache is keyed by (conqueror, jewelType, realSeed, passiveIdx).
+// The per-seed inner map is intentionally small (~60 entries) to keep
+// each lookup hot in L1: a single 474k-entry flat map regressed cached-bench
+// throughput by ~5× because the bucket array no longer fits in L2.
+var calculationCache = make(map[data.Conqueror]map[data.JewelType]map[uint32]map[uint32]data.AlternatePassiveSkillInformation)
+
 func Calculate(passiveID uint32, seed uint32, timelessJewelType data.JewelType, conqueror data.Conqueror) data.AlternatePassiveSkillInformation {
 	passiveSkill := data.GetPassiveSkillByIndex(passiveID)
 
@@ -15,8 +21,14 @@ func Calculate(passiveID uint32, seed uint32, timelessJewelType data.JewelType, 
 	}
 
 	alternateTreeVersion := data.GetAlternateTreeVersionIndex(uint32(timelessJewelType))
+	if alternateTreeVersion == nil {
+		return data.AlternatePassiveSkillInformation{}
+	}
 
 	timelessJewelConqueror := data.TimelessJewelConquerors[timelessJewelType][conqueror]
+	if timelessJewelConqueror == nil {
+		return data.AlternatePassiveSkillInformation{}
+	}
 
 	timelessJewel := data.TimelessJewel{
 		Seed:                   seed,
@@ -29,13 +41,13 @@ func Calculate(passiveID uint32, seed uint32, timelessJewelType data.JewelType, 
 		TimelessJewel: timelessJewel,
 	}
 
-	rng := random.NewRNG()
-	if alternateTreeManager.IsPassiveSkillReplaced(rng) {
-		return alternateTreeManager.ReplacePassiveSkill(rng)
+	var rng random.NumberGenerator
+	if alternateTreeManager.IsPassiveSkillReplaced(&rng) {
+		return alternateTreeManager.ReplacePassiveSkill(&rng)
 	}
 
 	return data.AlternatePassiveSkillInformation{
-		AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(rng),
+		AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(&rng),
 	}
 }
 
@@ -49,7 +61,14 @@ func ReverseSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelType data
 	}
 
 	alternateTreeVersion := data.GetAlternateTreeVersionIndex(uint32(timelessJewelType))
+	if alternateTreeVersion == nil {
+		return nil
+	}
+
 	timelessJewelConqueror := data.TimelessJewelConquerors[timelessJewelType][conqueror]
+	if timelessJewelConqueror == nil {
+		return nil
+	}
 
 	statMap := make(map[uint32]bool)
 	for _, id := range statIDs {
@@ -77,9 +96,21 @@ func ReverseSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelType data
 		endSeed = seedMax
 	}
 
+	conquerorCache, ok := calculationCache[conqueror]
+	if !ok {
+		conquerorCache = make(map[data.JewelType]map[uint32]map[uint32]data.AlternatePassiveSkillInformation)
+		calculationCache[conqueror] = conquerorCache
+	}
+
+	jewelCache, ok := conquerorCache[timelessJewelType]
+	if !ok {
+		jewelCache = make(map[uint32]map[uint32]data.AlternatePassiveSkillInformation)
+		conquerorCache[timelessJewelType] = jewelCache
+	}
+
 	results := make(map[uint32]map[uint32]map[uint32]int32)
 
-	rng := random.NewRNG()
+	var rng random.NumberGenerator
 	alternateTreeManager := AlternateTreeManager{}
 	timelessJewel := data.TimelessJewel{
 		AlternateTreeVersion:   alternateTreeVersion,
@@ -99,30 +130,48 @@ func ReverseSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelType data
 		timelessJewel.Seed = realSeed
 		alternateTreeManager.TimelessJewel = timelessJewel
 
+		seedCache, ok := jewelCache[realSeed]
+		if !ok {
+			seedCache = make(map[uint32]data.AlternatePassiveSkillInformation, len(passiveSkills))
+			jewelCache[realSeed] = seedCache
+		}
+
 		for _, skill := range passiveSkills {
 			alternateTreeManager.PassiveSkill = skill
-			var result data.AlternatePassiveSkillInformation
 
-			if alternateTreeManager.IsPassiveSkillReplaced(rng) {
-				result = alternateTreeManager.ReplacePassiveSkill(rng)
+			var result data.AlternatePassiveSkillInformation
+			if cacheHit, ok := seedCache[skill.Index]; ok {
+				result = cacheHit
 			} else {
-				result = data.AlternatePassiveSkillInformation{
-					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(rng),
+				if alternateTreeManager.IsPassiveSkillReplaced(&rng) {
+					result = alternateTreeManager.ReplacePassiveSkill(&rng)
+				} else {
+					result = data.AlternatePassiveSkillInformation{
+						AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(&rng),
+					}
 				}
+				seedCache[skill.Index] = result
 			}
+
+			var skillResults map[uint32]int32
 
 			if result.AlternatePassiveSkill != nil {
 				for i, key := range result.AlternatePassiveSkill.StatsKeys {
 					if _, ok := statMap[key]; ok {
-						if _, ok := results[realSeed]; !ok {
-							results[realSeed] = make(map[uint32]map[uint32]int32)
+						if skillResults == nil {
+							seedResults := results[realSeed]
+							if seedResults == nil {
+								seedResults = make(map[uint32]map[uint32]int32)
+								results[realSeed] = seedResults
+							}
+							if existing, ok := seedResults[skill.Index]; ok {
+								skillResults = existing
+							} else {
+								skillResults = make(map[uint32]int32)
+								seedResults[skill.Index] = skillResults
+							}
 						}
-						if _, ok := results[realSeed][skill.Index]; !ok {
-							results[realSeed][skill.Index] = make(map[uint32]int32)
-						}
-						if result.StatRolls != nil {
-							results[realSeed][skill.Index][key] = result.StatRolls[uint32(i)]
-						}
+						skillResults[key] = result.StatRolls[i]
 					}
 				}
 			}
@@ -131,15 +180,20 @@ func ReverseSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelType data
 				if augment.AlternatePassiveAddition != nil {
 					for i, key := range augment.AlternatePassiveAddition.StatsKeys {
 						if _, ok := statMap[key]; ok {
-							if _, ok := results[realSeed]; !ok {
-								results[realSeed] = make(map[uint32]map[uint32]int32)
+							if skillResults == nil {
+								seedResults := results[realSeed]
+								if seedResults == nil {
+									seedResults = make(map[uint32]map[uint32]int32)
+									results[realSeed] = seedResults
+								}
+								if existing, ok := seedResults[skill.Index]; ok {
+									skillResults = existing
+								} else {
+									skillResults = make(map[uint32]int32)
+									seedResults[skill.Index] = skillResults
+								}
 							}
-							if _, ok := results[realSeed][skill.Index]; !ok {
-								results[realSeed][skill.Index] = make(map[uint32]int32)
-							}
-							if augment.StatRolls != nil {
-								results[realSeed][skill.Index][key] = augment.StatRolls[uint32(i)]
-							}
+							skillResults[key] = augment.StatRolls[i]
 						}
 					}
 				}
@@ -169,7 +223,14 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 	}
 
 	alternateTreeVersion := data.GetAlternateTreeVersionIndex(uint32(timelessJewelType))
+	if alternateTreeVersion == nil {
+		return nil
+	}
+
 	timelessJewelConqueror := data.TimelessJewelConquerors[timelessJewelType][conqueror]
+	if timelessJewelConqueror == nil {
+		return nil
+	}
 
 	statMap := make(map[uint32]bool)
 	for _, id := range statIDs {
@@ -199,7 +260,7 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 
 	results := make(map[uint32]map[uint32]map[uint32]map[uint32]int32)
 
-	rng := random.NewRNG()
+	var rng random.NumberGenerator
 	alternateTreeManager := AlternateTreeManager{}
 	timelessJewel := data.TimelessJewel{
 		AlternateTreeVersion:   alternateTreeVersion,
@@ -223,11 +284,11 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 			alternateTreeManager.PassiveSkill = skill
 			var result data.AlternatePassiveSkillInformation
 
-			if alternateTreeManager.IsPassiveSkillReplaced(rng) {
-				result = alternateTreeManager.ReplacePassiveSkill(rng)
+			if alternateTreeManager.IsPassiveSkillReplaced(&rng) {
+				result = alternateTreeManager.ReplacePassiveSkill(&rng)
 			} else {
 				result = data.AlternatePassiveSkillInformation{
-					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(rng),
+					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(&rng),
 				}
 			}
 
@@ -244,9 +305,7 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 							if _, ok := results[socketID][realSeed][skill.Index]; !ok {
 								results[socketID][realSeed][skill.Index] = make(map[uint32]int32)
 							}
-							if result.StatRolls != nil {
-								results[socketID][realSeed][skill.Index][key] = result.StatRolls[uint32(i)]
-							}
+							results[socketID][realSeed][skill.Index][key] = result.StatRolls[i]
 						}
 					}
 				}
@@ -266,9 +325,7 @@ func MassReverseSearch(scion map[uint32][]uint32, statIDs []uint32, timelessJewe
 								if _, ok := results[socketID][realSeed][skill.Index]; !ok {
 									results[socketID][realSeed][skill.Index] = make(map[uint32]int32)
 								}
-								if augment.StatRolls != nil {
-									results[socketID][realSeed][skill.Index][key] = augment.StatRolls[uint32(i)]
-								}
+								results[socketID][realSeed][skill.Index][key] = augment.StatRolls[i]
 							}
 						}
 					}
@@ -290,6 +347,9 @@ func TargetedMarketSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelTy
 	}
 
 	alternateTreeVersion := data.GetAlternateTreeVersionIndex(uint32(timelessJewelType))
+	if alternateTreeVersion == nil {
+		return nil
+	}
 
 	statMap := make(map[uint32]bool)
 	for _, id := range statIDs {
@@ -298,7 +358,7 @@ func TargetedMarketSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelTy
 
 	results := make(map[uint32]map[uint32]map[uint32]int32)
 
-	rng := random.NewRNG()
+	var rng random.NumberGenerator
 	alternateTreeManager := AlternateTreeManager{}
 
 	for i, seed := range seeds {
@@ -314,6 +374,9 @@ func TargetedMarketSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelTy
 		}
 
 		timelessJewelConqueror := data.TimelessJewelConquerors[timelessJewelType][conqueror]
+		if timelessJewelConqueror == nil {
+			continue
+		}
 		timelessJewel := data.TimelessJewel{
 			AlternateTreeVersion:   alternateTreeVersion,
 			TimelessJewelConqueror: timelessJewelConqueror,
@@ -326,11 +389,11 @@ func TargetedMarketSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelTy
 			alternateTreeManager.PassiveSkill = skill
 			var result data.AlternatePassiveSkillInformation
 
-			if alternateTreeManager.IsPassiveSkillReplaced(rng) {
-				result = alternateTreeManager.ReplacePassiveSkill(rng)
+			if alternateTreeManager.IsPassiveSkillReplaced(&rng) {
+				result = alternateTreeManager.ReplacePassiveSkill(&rng)
 			} else {
 				result = data.AlternatePassiveSkillInformation{
-					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(rng),
+					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(&rng),
 				}
 			}
 
@@ -343,9 +406,7 @@ func TargetedMarketSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelTy
 						if _, ok := results[realSeed][skill.Index]; !ok {
 							results[realSeed][skill.Index] = make(map[uint32]int32)
 						}
-						if result.StatRolls != nil {
-							results[realSeed][skill.Index][key] = result.StatRolls[uint32(j)]
-						}
+						results[realSeed][skill.Index][key] = result.StatRolls[j]
 					}
 				}
 			}
@@ -360,9 +421,7 @@ func TargetedMarketSearch(passiveIDs []uint32, statIDs []uint32, timelessJewelTy
 							if _, ok := results[realSeed][skill.Index]; !ok {
 								results[realSeed][skill.Index] = make(map[uint32]int32)
 							}
-							if augment.StatRolls != nil {
-								results[realSeed][skill.Index][key] = augment.StatRolls[uint32(j)]
-							}
+							results[realSeed][skill.Index][key] = augment.StatRolls[j]
 						}
 					}
 				}
@@ -392,6 +451,9 @@ func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timel
 	}
 
 	alternateTreeVersion := data.GetAlternateTreeVersionIndex(uint32(timelessJewelType))
+	if alternateTreeVersion == nil {
+		return nil
+	}
 
 	statMap := make(map[uint32]bool)
 	for _, id := range statIDs {
@@ -400,7 +462,7 @@ func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timel
 
 	results := make(map[uint32]map[uint32]map[uint32]map[uint32]int32)
 
-	rng := random.NewRNG()
+	var rng random.NumberGenerator
 	alternateTreeManager := AlternateTreeManager{}
 
 	for i, seed := range seeds {
@@ -416,6 +478,9 @@ func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timel
 		}
 
 		timelessJewelConqueror := data.TimelessJewelConquerors[timelessJewelType][conqueror]
+		if timelessJewelConqueror == nil {
+			continue
+		}
 		timelessJewel := data.TimelessJewel{
 			AlternateTreeVersion:   alternateTreeVersion,
 			TimelessJewelConqueror: timelessJewelConqueror,
@@ -428,11 +493,11 @@ func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timel
 			alternateTreeManager.PassiveSkill = skill
 			var result data.AlternatePassiveSkillInformation
 
-			if alternateTreeManager.IsPassiveSkillReplaced(rng) {
-				result = alternateTreeManager.ReplacePassiveSkill(rng)
+			if alternateTreeManager.IsPassiveSkillReplaced(&rng) {
+				result = alternateTreeManager.ReplacePassiveSkill(&rng)
 			} else {
 				result = data.AlternatePassiveSkillInformation{
-					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(rng),
+					AlternatePassiveAdditionInformations: alternateTreeManager.AugmentPassiveSkill(&rng),
 				}
 			}
 
@@ -449,9 +514,7 @@ func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timel
 							if _, ok := results[socketID][realSeed][skill.Index]; !ok {
 								results[socketID][realSeed][skill.Index] = make(map[uint32]int32)
 							}
-							if result.StatRolls != nil {
-								results[socketID][realSeed][skill.Index][key] = result.StatRolls[uint32(j)]
-							}
+							results[socketID][realSeed][skill.Index][key] = result.StatRolls[j]
 						}
 					}
 				}
@@ -471,9 +534,7 @@ func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timel
 								if _, ok := results[socketID][realSeed][skill.Index]; !ok {
 									results[socketID][realSeed][skill.Index] = make(map[uint32]int32)
 								}
-								if augment.StatRolls != nil {
-									results[socketID][realSeed][skill.Index][key] = augment.StatRolls[uint32(j)]
-								}
+								results[socketID][realSeed][skill.Index][key] = augment.StatRolls[j]
 							}
 						}
 					}
@@ -486,4 +547,5 @@ func TargetedMassMarketSearch(scion map[uint32][]uint32, statIDs []uint32, timel
 }
 
 func ClearCache() {
+	calculationCache = make(map[data.Conqueror]map[data.JewelType]map[uint32]map[uint32]data.AlternatePassiveSkillInformation)
 }

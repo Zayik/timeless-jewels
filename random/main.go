@@ -129,17 +129,13 @@ func (g *NumberGenerator) GenerateSingle(exclusiveMaximumValue uint32) uint32 {
 	return g.GenerateUInt() % exclusiveMaximumValue
 }
 
+func (g *NumberGenerator) GenerateSigned(minValue int32, maxValue int32) int32 {
+	return int32(g.Generate(uint32(minValue), uint32(maxValue)))
+}
+
 func (g *NumberGenerator) Generate(minValue uint32, maxValue uint32) uint32 {
 	a := minValue + 0x80000000
 	b := maxValue + 0x80000000
-
-	if minValue >= 0x80000000 {
-		a = minValue + 0x80000000
-	}
-
-	if maxValue >= 0x80000000 {
-		b = maxValue + 0x80000000
-	}
 
 	roll := g.GenerateSingle((b - a) + 1)
 
