@@ -6,7 +6,9 @@ import { data } from './types';
 const isLocalhost = () => typeof window !== 'undefined' && window.location.hostname === 'localhost';
 
 const getHttpBase = (): string => {
-  if (isLocalhost()) return '';
+  if (isLocalhost()) {
+    return '';
+  }
   return import.meta.env.VITE_PROXY_BASE_URL ?? 'https://www.pathofexile.com';
 };
 
@@ -350,8 +352,7 @@ export const pruneStaleMarketJewels = async (
   onProgress: (msg: string) => void
 ): Promise<MarketJewel[]> => {
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
-  const baseUrl =
-    getHttpBase();
+  const baseUrl = getHttpBase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -430,8 +431,7 @@ export const fetchMarketJewels = async (
   );
 
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
-  const baseUrl =
-    getHttpBase();
+  const baseUrl = getHttpBase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -555,8 +555,7 @@ export const openLiveSearch = async (
   onStatus: (msg: string) => void
 ): Promise<() => void> => {
   const baseName = data.TimelessJewels ? data.TimelessJewels[jewelId] : 'Timeless Jewel';
-  const baseUrl =
-    getHttpBase();
+  const baseUrl = getHttpBase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

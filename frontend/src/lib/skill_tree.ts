@@ -370,7 +370,6 @@ export const translateStat = (id: number, roll?: number | undefined): string => 
   return translationText;
 };
 
-
 export interface TargetedMassMarketSearchConfig {
   jewel: number;
   seeds: number[];
