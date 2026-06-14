@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SearchWithSeed } from '../skill_tree';
-  import { skillTree, translateStat, openTrade } from '../skill_tree';
+  import { skillTree, translateStat } from '../skill_tree';
+  import { openTrade } from '../trade';
 
   export let highlight: (newSeed: number, passives: number[]) => void;
   export let set: SearchWithSeed;
@@ -8,12 +9,18 @@
   export let conqueror: string;
   export let platform: string;
   export let league: string;
+  export let isLegacyTradersMode = false;
 </script>
 
 <div
   class="my-2 border-white/50 border p-2 flex flex-col cursor-pointer"
   role="button"
   tabindex="0"
+  on:click={() =>
+    highlight(
+      set.seed,
+      set.skills.map((s) => s.passive)
+    )}
   on:keydown={(e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -22,12 +29,7 @@
         set.skills.map((s) => s.passive)
       );
     }
-  }}
-  on:click={() =>
-    highlight(
-      set.seed,
-      set.skills.map((s) => s.passive)
-    )}>
+  }}>
   <div class="flex flex-row justify-between">
     <!-- Padding -->
     <button class="px-3 invisible">Trade</button>
@@ -42,7 +44,7 @@
         <span class="text-xs text-gray-500">{new Date(set.listedAt).toLocaleTimeString()}</span>
       {/if}
     </div>
-    <button class="px-3 bg-blue-500/40 rounded self-start" on:click={() => openTrade(jewel, set.conqueror || conqueror, [set], platform, league)}>Trade</button>
+    <button class="px-3 bg-blue-500/40 rounded self-start" on:click={() => openTrade(jewel, set.conqueror || conqueror, [set], platform, league, isLegacyTradersMode)}>Trade</button>
   </div>
   {#each set.skills as skill}
     <div class="mt-2">
