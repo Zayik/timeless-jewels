@@ -4,7 +4,8 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import type { Node } from '../lib/skill_tree_types';
-  import { getAffectedNodes, skillTree, translateStat, openTrade } from '../lib/skill_tree';
+  import { getAffectedNodes, skillTree, translateStat } from '../lib/skill_tree';
+  import { openTrade } from '../lib/trade';
   import { syncWrap } from '../lib/worker';
   import { proxy } from 'comlink';
   import type { ReverseSearchConfig, StatConfig, MassReverseSearchConfig, MassSearchResults } from '../lib/skill_tree';
@@ -700,6 +701,13 @@
   return;
   }
 
+    if (!poeSessId) {
+      showMarketPanel = true;
+      showMarketSettings = true;
+      liveFeedStatus = 'auth-required';
+      return;
+    }
+
     if (allSockets) {
   liveFeedAllActive = true;
   } else {
@@ -754,8 +762,12 @@
         poeSessId,
         handleNewJewels,
         (msg) => {
-   liveFeedStatus = msg; 
-  }
+          liveFeedStatus = msg;
+          if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('failed')) {
+            showMarketPanel = true;
+            showMarketSettings = true;
+          }
+        }
       );
       liveFeeds = [cleanup];
     } catch (e) {
@@ -988,6 +1000,11 @@
                           <span class="text-xs text-gray-400 mb-1">POESESSID (optional) <button type="button" class="ml-1 text-blue-400 hover:text-blue-300 underline" on:click={() => (showSessionHelp = !showSessionHelp)}>(?)</button></span>
                           <input type="password" autocomplete="new-password" bind:value={poeSessId} class="bg-gray-700 rounded p-1 text-white text-xs" placeholder="Enter session id..." />
                         </label>
+                        {#if !poeSessId}
+                          <div class="text-xs text-orange-300 bg-orange-900/40 border border-orange-600/50 rounded p-2">
+                            POESESSID is required to use Sync and Live Market features.
+                          </div>
+                        {/if}
                         {#if showSessionHelp}
                           <div class="bg-gray-800 border border-gray-600 p-2 rounded text-xs text-gray-300">
                             <p class="font-bold mb-1 text-white">How to get your POESESSID:</p>
@@ -1325,7 +1342,13 @@
                       </button>
                     </div>
                     {#if liveFeedStatus}
-                      <div class="text-xs text-gray-400 mt-1">{liveFeedStatus}</div>
+                      <div
+                        class="text-xs mt-1"
+                        class:text-orange-400={liveFeedStatus === 'auth-required'}
+                        class:text-red-400={liveFeedStatus !== 'auth-required' && (liveFeedStatus.toLowerCase().includes('error') || liveFeedStatus.toLowerCase().includes('failed'))}
+                        class:text-gray-400={liveFeedStatus !== 'auth-required' && !liveFeedStatus.toLowerCase().includes('error') && !liveFeedStatus.toLowerCase().includes('failed')}>
+                        {liveFeedStatus === 'auth-required' ? 'Enter your POESESSID in Market → Settings above to use the live feed.' : liveFeedStatus}
+                      </div>
                     {/if}
                     <div class="flex flex-row mt-2 space-x-2 items-center">
                       <input
