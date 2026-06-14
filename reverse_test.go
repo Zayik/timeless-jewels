@@ -14,16 +14,16 @@ func TestReverseGloriousVanity(t *testing.T) {
 	statIDs := []uint32{25}
 	result := calculator.ReverseSearch(passiveIDs, statIDs, data.GloriousVanity, data.Xibaqua, 0, 1, nil)
 	testza.AssertLen(t, result, 7294)
-	testza.AssertLen(t, result[3071], 3)
-	testza.AssertEqual(t, int32(9), result[3071][628][statIDs[0]])
+	testza.AssertLen(t, result[1001], 2)
+	testza.AssertEqual(t, int32(7), result[1001][1175][statIDs[0]])
 }
 
 func TestReverseElegantHubris(t *testing.T) {
 	statIDs := []uint32{25}
 	result := calculator.ReverseSearch(passiveIDs, statIDs, data.ElegantHubris, data.Cadiro, 0, 1, nil)
 	testza.AssertLen(t, result, 2375)
-	testza.AssertLen(t, result[114920], 2)
-	testza.AssertEqual(t, int32(80), result[114920][698][statIDs[0]])
+	testza.AssertLen(t, result[45060], 1)
+	testza.AssertEqual(t, int32(80), result[45060][2556][statIDs[0]])
 }
 
 func BenchmarkGloriousVanity(b *testing.B) {
