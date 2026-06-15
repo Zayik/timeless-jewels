@@ -10,24 +10,30 @@
   type Props = {
     selectedJewel: { value: number; label: string };
     leagues: { value: string; label: string }[];
+    conquerors: { value: string; label: string }[];
+    selectedConqueror?: { value: string; label: string };
     league?: { value: string; label: string };
     cachedJewels?: MarketJewel[];
     poeSessId?: string;
     showMarketPanel?: boolean;
     showMarketSettings?: boolean;
     filteredMarketJewels?: MarketJewel[];
+    onConquerorChange?: () => void;
     onseedselect?: (detail: { seed: number; worshipper: string }) => void;
   };
 
   let {
     selectedJewel,
     leagues,
+    conquerors,
+    selectedConqueror = $bindable<{ value: string; label: string } | undefined>(),
     league = $bindable<{ value: string; label: string } | undefined>(),
     cachedJewels = $bindable([]),
     poeSessId = $bindable(''),
-    showMarketPanel = $bindable(true),
+    showMarketPanel = $bindable(false),
     showMarketSettings = $bindable(false),
     filteredMarketJewels = $bindable([]),
+    onConquerorChange,
     onseedselect
   }: Props = $props();
 
@@ -52,7 +58,7 @@
 
   onMount(() => {
     poeSessId = getPoeSessionId();
-    showMarketPanel = getShowMarketPanel(true);
+    showMarketPanel = getShowMarketPanel(false);
   });
 
   $effect(() => {
@@ -179,6 +185,17 @@
 
   {#if showMarketPanel}
     <div class="p-2 pt-0 flex flex-col space-y-2 text-sm">
+      <!-- Conqueror selector (only affects trade/market URLs and the seed preview's
+           default; node tooltips show every conqueror regardless) -->
+      <div class="border-t border-gray-700 pt-2">
+        <span class="text-xs text-gray-400">Conqueror</span>
+        <Select
+          items={conquerors}
+          bind:value={selectedConqueror}
+          clearable={false}
+          on:change={() => onConquerorChange?.()} />
+      </div>
+
       <!-- Settings (collapsible) -->
       <div class="border-t border-gray-700 pt-2">
         <button
