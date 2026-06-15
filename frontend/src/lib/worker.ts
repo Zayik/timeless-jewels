@@ -16,15 +16,32 @@ interface WorkerData {
   syncWrap: Comlink.Remote<WorkerType>;
 }
 
+const POOL_KEY = '__timeless_worker_pool__';
+
+// Cap the worker pool. Each worker independently downloads, decompresses, and
+// JSON.parses all game data (including the multi-MB SkillTree.json), so the
+// pool size directly multiplies boot-time network/CPU and steady-state RAM.
+// On high-core machines an uncapped pool (e.g. 24) creates a thundering herd of
+// concurrent requests that chokes the dev server and exhausts memory. A modest
+// cap keeps real parallelism for the seed search while bounding that cost.
+const MAX_POOL_SIZE = 8;
+
 function getWorkerPool(): WorkerData[] {
-  console.log('Creating sync worker pool');
-  const poolSize = navigator.hardwareConcurrency || 4;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const existing = (globalThis as any)[POOL_KEY] as WorkerData[] | undefined;
+  if (existing) {
+    return existing;
+  }
+
+  const poolSize = Math.min(navigator.hardwareConcurrency || 4, MAX_POOL_SIZE);
   const pool: WorkerData[] = [];
   for (let i = 0; i < poolSize; i++) {
     const theWorker = new SyncWorker();
     const obj = Comlink.wrap<WorkerType>(theWorker);
     pool.push({ syncWorker: theWorker, syncWrap: obj });
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any)[POOL_KEY] = pool;
   return pool;
 }
 
@@ -71,8 +88,17 @@ function mergeAndTrimSocketResults(
 
 export const syncWrap = browser
   ? {
-      boot: (wasm: ArrayBuffer) => Promise.all(pool.map((w) => w.syncWrap.boot(wasm))),
-      search: async (args: ReverseSearchConfig, callback: (seed: number) => Promise<void>): Promise<SearchResults> => {
+      boot: async () => {
+        // Boot workers in small batches so they don't all fire their data
+        // downloads at the same instant (which overwhelms the dev server and
+        // spikes memory). Each batch finishes loading before the next starts.
+        const BATCH_SIZE = 2;
+        for (let i = 0; i < pool.length; i += BATCH_SIZE) {
+          const batch = pool.slice(i, i + BATCH_SIZE);
+          await Promise.all(batch.map((w) => w.syncWrap.boot()));
+        }
+      },
+      search: async (args: ReverseSearchConfig, callback: (seed: number) => void): Promise<SearchResults> => {
         const numWorkers = pool.length;
 
         // We run the searches in parallel
@@ -131,7 +157,7 @@ export const syncWrap = browser
       },
       massSearch: async (
         args: MassReverseSearchConfig,
-        callback: (seed: number) => Promise<void>
+        callback?: (seed: number) => void
       ): Promise<MassSearchResults> => {
         const numWorkers = pool.length;
 
@@ -205,7 +231,7 @@ export const syncWrap = browser
       },
       targetedMassSearch: async (
         args: TargetedMassMarketSearchConfig,
-        callback: (seed: number) => Promise<void>
+        callback: (seed: number) => void
       ): Promise<MassSearchResults> => {
         const numWorkers = pool.length;
         const chunkSize = Math.ceil(args.seeds.length / numWorkers);
