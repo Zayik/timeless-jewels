@@ -3,25 +3,29 @@
   import { skillTree, translateStat } from '../skill_tree';
   import { openTrade } from '../trade';
 
-  export let highlight: (newSeed: number, passives: number[]) => void;
-  export let set: SearchWithSeed;
-  export let jewel: number;
-  export let conqueror: string;
-  export let platform: string;
-  export let league: string;
-  export let isLegacyTradersMode = false;
+  type Props = {
+    highlight: (newSeed: number, passives: number[]) => void;
+    set: SearchWithSeed;
+    jewel: number;
+    conqueror: string;
+    platform: string;
+    league: string;
+    isLegacyTradersMode?: boolean;
+  };
+
+  const { highlight, set, jewel, conqueror, platform, league, isLegacyTradersMode = false }: Props = $props();
 </script>
 
 <div
   class="my-2 border-white/50 border p-2 flex flex-col cursor-pointer"
   role="button"
   tabindex="0"
-  on:click={() =>
+  onclick={() =>
     highlight(
       set.seed,
       set.skills.map((s) => s.passive)
     )}
-  on:keydown={(e) => {
+  onkeydown={(e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       highlight(
@@ -37,14 +41,18 @@
       <span>Seed {set.seed} (weight {set.weight})</span>
       {#if set.conqueror}
         <span class="text-sm text-gray-400 font-normal">
-          {set.conqueror} {#if set.price}- {set.price}{/if}
+          {set.conqueror}
+          {#if set.price}- {set.price}{/if}
         </span>
       {/if}
       {#if set.listedAt}
         <span class="text-xs text-gray-500">{new Date(set.listedAt).toLocaleTimeString()}</span>
       {/if}
     </div>
-    <button class="px-3 bg-blue-500/40 rounded self-start" on:click={() => openTrade(jewel, set.conqueror || conqueror, [set], platform, league, isLegacyTradersMode)}>Trade</button>
+    <button
+      class="px-3 bg-blue-500/40 rounded self-start"
+      onclick={() => openTrade(jewel, set.conqueror || conqueror, [set], platform, league, isLegacyTradersMode)}
+      >Trade</button>
   </div>
   {#each set.skills as skill}
     <div class="mt-2">

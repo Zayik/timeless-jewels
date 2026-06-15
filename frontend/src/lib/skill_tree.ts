@@ -1,6 +1,8 @@
 import type { Translation, Node, SkillTreeData, Group, Sprite, TranslationFile } from './skill_tree_types';
 import { data } from './types';
 
+const SPRITE_SCALE = '0.3835';
+
 export let skillTree: SkillTreeData;
 
 export const drawnGroups: Record<number, Group> = {};
@@ -12,6 +14,10 @@ export const inverseSpritesActive: Record<string, Sprite> = {};
 export const inverseTranslations: Record<string, Translation> = {};
 
 export const passiveToTree: Record<number, number> = {};
+
+function indexSprites(sprite: Sprite, map: Record<string, Sprite>): void {
+  Object.keys(sprite.coords).forEach((c) => (map[c] = sprite));
+}
 
 export const loadSkillTree = () => {
   skillTree = JSON.parse(data.SkillTree);
@@ -54,38 +60,18 @@ export const loadSkillTree = () => {
     });
   });
 
-  Object.keys(skillTree.sprites.keystoneInactive['0.3835'].coords).forEach(
-    (c) => (inverseSprites[c] = skillTree.sprites.keystoneInactive['0.3835'])
-  );
-  Object.keys(skillTree.sprites.notableInactive['0.3835'].coords).forEach(
-    (c) => (inverseSprites[c] = skillTree.sprites.notableInactive['0.3835'])
-  );
-  Object.keys(skillTree.sprites.normalInactive['0.3835'].coords).forEach(
-    (c) => (inverseSprites[c] = skillTree.sprites.normalInactive['0.3835'])
-  );
-  Object.keys(skillTree.sprites.masteryInactive['0.3835'].coords).forEach(
-    (c) => (inverseSprites[c] = skillTree.sprites.masteryInactive['0.3835'])
-  );
+  indexSprites(skillTree.sprites.keystoneInactive[SPRITE_SCALE], inverseSprites);
+  indexSprites(skillTree.sprites.notableInactive[SPRITE_SCALE], inverseSprites);
+  indexSprites(skillTree.sprites.normalInactive[SPRITE_SCALE], inverseSprites);
+  indexSprites(skillTree.sprites.masteryInactive[SPRITE_SCALE], inverseSprites);
 
-  Object.keys(skillTree.sprites.keystoneActive['0.3835'].coords).forEach(
-    (c) => (inverseSpritesActive[c] = skillTree.sprites.keystoneActive['0.3835'])
-  );
-  Object.keys(skillTree.sprites.notableActive['0.3835'].coords).forEach(
-    (c) => (inverseSpritesActive[c] = skillTree.sprites.notableActive['0.3835'])
-  );
-  Object.keys(skillTree.sprites.normalActive['0.3835'].coords).forEach(
-    (c) => (inverseSpritesActive[c] = skillTree.sprites.normalActive['0.3835'])
-  );
-  Object.keys(skillTree.sprites.masteryInactive['0.3835'].coords).forEach(
-    (c) => (inverseSpritesActive[c] = skillTree.sprites.masteryInactive['0.3835'])
-  );
+  indexSprites(skillTree.sprites.keystoneActive[SPRITE_SCALE], inverseSpritesActive);
+  indexSprites(skillTree.sprites.notableActive[SPRITE_SCALE], inverseSpritesActive);
+  indexSprites(skillTree.sprites.normalActive[SPRITE_SCALE], inverseSpritesActive);
+  indexSprites(skillTree.sprites.masteryInactive[SPRITE_SCALE], inverseSpritesActive);
 
-  Object.keys(skillTree.sprites.groupBackground['0.3835'].coords).forEach(
-    (c) => (inverseSprites[c] = skillTree.sprites.groupBackground['0.3835'])
-  );
-  Object.keys(skillTree.sprites.frame['0.3835'].coords).forEach(
-    (c) => (inverseSprites[c] = skillTree.sprites.frame['0.3835'])
-  );
+  indexSprites(skillTree.sprites.groupBackground[SPRITE_SCALE], inverseSprites);
+  indexSprites(skillTree.sprites.frame[SPRITE_SCALE], inverseSprites);
 
   const translationFiles = [
     data.StatTranslationsJSON,

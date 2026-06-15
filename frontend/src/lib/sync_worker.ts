@@ -1,5 +1,4 @@
 import { expose } from 'comlink';
-import '../wasm_exec.js';
 import { loadSkillTree, passiveToTree } from './skill_tree';
 import type {
   SearchWithSeed,
@@ -11,19 +10,11 @@ import type {
 import { calculator, initializeCrystalline } from './types';
 
 const obj = {
-  boot(wasm: ArrayBuffer) {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    const go = new Go();
-    WebAssembly.instantiate(wasm, go.importObject).then((result) => {
-      go.run(result.instance);
-
-      initializeCrystalline();
-
-      loadSkillTree();
-    });
+  async boot() {
+    await initializeCrystalline();
+    loadSkillTree();
   },
-  async search(args: ReverseSearchConfig, callback: (seed: number) => Promise<void>): Promise<SearchResults> {
+  async search(args: ReverseSearchConfig, callback: (seed: number) => void): Promise<SearchResults> {
     const searchResult = await calculator.ReverseSearch(
       args.nodes,
       args.stats.map((s) => s.id),
@@ -113,11 +104,7 @@ const obj = {
         .sort((a, b) => b.weight - a.weight)
     };
   },
-  async massSearch(
-    args: MassReverseSearchConfig,
-    callback: (seed: number) => Promise<void>
-  ): Promise<MassSearchResults> {
-    console.log('MASS SEARCH ARGS', args);
+  async massSearch(args: MassReverseSearchConfig, callback?: (seed: number) => void): Promise<MassSearchResults> {
     const searchResult = await calculator.MassReverseSearch(
       args.socketToNodes,
       args.stats.map((s) => s.id),
@@ -132,7 +119,6 @@ const obj = {
 
     for (const socketIdStr in searchResult) {
       const socketId = parseInt(socketIdStr);
-      console.log('socket id:', socketIdStr, 'socketSearchResult:', searchResult[socketId]);
       const socketSearchResult = searchResult[socketId];
       if (!socketSearchResult) {
         continue;
@@ -233,7 +219,7 @@ const obj = {
   },
   async targetedMassSearch(
     args: import('./skill_tree').TargetedMassMarketSearchConfig,
-    callback: (seed: number) => Promise<void>
+    callback: (seed: number) => void
   ): Promise<MassSearchResults> {
     const searchResult = await calculator.TargetedMassMarketSearch(
       args.socketToNodes,

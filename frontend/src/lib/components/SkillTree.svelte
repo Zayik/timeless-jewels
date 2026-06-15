@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Canvas, Layer, t } from 'svelte-canvas';
+  import { Canvas, Layer } from 'svelte-canvas';
   import type { RenderFunc, Node } from '../skill_tree_types';
   import {
     baseJewelRadius,
@@ -16,7 +16,6 @@
     toCanvasCoords
   } from '../skill_tree';
   import type { Point } from '../skill_tree';
-  import { derived } from 'svelte/store';
   import { calculator, data } from '../types';
 
   export let clickNode: (node: Node) => void;
@@ -42,14 +41,6 @@
     offsetX = (window.innerWidth / 2) * scaling - pos.x;
     offsetY = (window.innerHeight / 2) * scaling - pos.y;
   };
-
-  const slowTime = derived(t, (timeVal: number) => {
-    if ((!highlighted || highlighted.length === 0) && !highlightJewels) {
-      return 0;
-    }
-
-    return Math.round(timeVal / 40);
-  });
 
   const startGroups = [427, 320, 226, 227, 323, 422, 329];
 
@@ -159,8 +150,12 @@
   let cursor = 'unset';
 
   let hoveredNode: Node | undefined;
-  $: render = (({ context, width, height }) => {
+  const render: RenderFunc = ({ context, width, height, time }) => {
     const start = window.performance.now();
+
+    // Convert time (ms) to a slow-rotating hue for highlight animation.
+    // When nothing is highlighted, stay at hue 0 (no visible pulsing).
+    const slowTime = (highlighted && highlighted.length > 0) || highlightJewels ? Math.round(time / 40) : 0;
 
     context.clearRect(0, 0, width, height);
 
@@ -245,8 +240,8 @@
       });
     });
 
-    let circledNodePos: Point;
-    if (circledNode) {
+    let circledNodePos: Point | undefined;
+    if (circledNode && drawnNodes[circledNode]) {
       circledNodePos = calculateNodePos(drawnNodes[circledNode], offsetX, offsetY, scaling);
       context.strokeStyle = '#ad2b2b';
     }
@@ -259,7 +254,7 @@
       let touchDistance = 0;
 
       let active = false;
-      if (circledNode) {
+      if (circledNodePos) {
         if (distance(rotatedPos, circledNodePos) < jewelRadius) {
           active = true;
         }
@@ -313,7 +308,7 @@
       }
 
       if (highlighted.indexOf(node.skill) >= 0 || (highlightJewels && node.isJewelSocket)) {
-        context.strokeStyle = `hsl(${$slowTime}, 100%, 50%)`;
+        context.strokeStyle = `hsl(${slowTime}, 100%, 50%)`;
         context.lineWidth = 3;
         context.beginPath();
         context.arc(rotatedPos.x, rotatedPos.y, (touchDistance + 30) / scaling, 0, Math.PI * 2);
@@ -328,7 +323,7 @@
 
     hoveredNode = newHoverNode;
 
-    if (circledNode) {
+    if (circledNodePos) {
       context.strokeStyle = '#ad2b2b';
       context.lineWidth = 1;
       context.beginPath();
@@ -479,7 +474,7 @@
     const end = window.performance.now();
 
     context.fillText(`${(end - start).toFixed(1)}ms`, width - 5, 17);
-  }) as RenderFunc;
+  };
 
   let downX = 0;
   let downY = 0;
@@ -570,7 +565,7 @@
 
 {#if width && height}
   <div on:resize={resize} style="touch-action: none; cursor: {cursor}">
-    <Canvas {width} {height} on:pointerdown={mouseDown} on:wheel={onScroll}>
+    <Canvas {width} {height} autoplay onpointerdown={mouseDown} onwheel={onScroll}>
       <Layer {render} />
     </Canvas>
     <slot />
