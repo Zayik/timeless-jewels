@@ -12,20 +12,6 @@ function Info($msg) { Write-Host $msg -ForegroundColor Cyan }
 function Ok($msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "  ! $msg" -ForegroundColor Yellow }
 
-# ── Go ─────────────────────────────────────────────────────────────────────────
-Info "Checking Go..."
-if (Has go) {
-    $goVer = (go version) -replace '.*go(\d+\.\d+\.\d+).*','$1'
-    Ok "Go $goVer found"
-} else {
-    Warn "Go not found. Install Go 1.22+ from https://go.dev/dl/ and re-run this script."
-    exit 1
-}
-
-Info "Downloading Go modules..."
-go mod download
-Ok "Go modules ready"
-
 # ── Node.js ────────────────────────────────────────────────────────────────────
 Info "Checking Node.js..."
 $requiredNode = Get-Content "$root\frontend\.nvmrc" -Raw
@@ -79,6 +65,6 @@ Ok "Frontend dependencies installed"
 # ── Summary ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "Environment ready." -ForegroundColor Green
-Write-Host "  Build WASM:      " -NoNewline; Write-Host ".\build.ps1" -ForegroundColor White
 Write-Host "  Run dev server:  " -NoNewline; Write-Host ".\dev.ps1" -ForegroundColor White
-Write-Host "  Run tests:       " -NoNewline; Write-Host "go test ./..." -ForegroundColor White
+Write-Host "  Run checks:      " -NoNewline; Write-Host ".\test.ps1" -ForegroundColor White
+Write-Host "  Build:           " -NoNewline; Write-Host "cd frontend; pnpm run build" -ForegroundColor White
