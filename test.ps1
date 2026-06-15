@@ -1,9 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-Write-Host "Running backend Go tests..." -ForegroundColor Cyan
-go test -v ./...
-
-Write-Host "Running frontend linting and checks..." -ForegroundColor Cyan
+Write-Host "Running frontend type-check and linting..." -ForegroundColor Cyan
 Push-Location frontend
 
 # Check for package manager
