@@ -61,6 +61,18 @@
       : undefined
   );
 
+  // Conqueror is de-emphasized (its picker lives under the Market section), so
+  // keep a sensible default selected for the chosen jewel. This keeps search,
+  // trade URLs, and the seed preview working without the user opening Market.
+  $effect(() => {
+    if (selectedJewel && conquerors.length > 0) {
+      const valid = conquerors.some((c) => c.value === selectedConqueror?.value);
+      if (!valid) {
+        selectedConqueror = conquerors[0];
+      }
+    }
+  });
+
   let seed = $state<number>(searchParams.has('seed') ? parseInt(searchParams.get('seed')) : 0);
 
   let circledNode = $state<number | undefined>(
@@ -700,7 +712,6 @@
   {clickNode}
   {circledNode}
   selectedJewel={selectedJewel?.value}
-  selectedConqueror={selectedConqueror?.value}
   {highlighted}
   {seed}
   highlightJewels={!circledNode}
@@ -756,26 +767,9 @@
           <Select items={jewels} bind:value={selectedJewel} on:change={changeJewel} />
 
           {#if selectedJewel}
-            <MarketPanel
-              {selectedJewel}
-              {leagues}
-              bind:league
-              bind:cachedJewels
-              bind:poeSessId
-              bind:showMarketPanel
-              bind:showMarketSettings
-              bind:filteredMarketJewels
-              onseedselect={({ seed: s, worshipper }) => {
-                seed = s;
-                selectedConqueror = { value: worshipper, label: worshipper };
-                mode = 'seed';
-                updateUrl();
-              }} />
-
             <SearchConfigPanel
               {selectedJewel}
               bind:selectedConqueror
-              {conquerors}
               bind:mode
               bind:seed
               {affectedNodes}
@@ -810,6 +804,25 @@
               onDeselectAll={deselectAll}
               onHighlight={highlight}
               onUpdateUrl={updateUrl} />
+
+            <MarketPanel
+              {selectedJewel}
+              {leagues}
+              {conquerors}
+              bind:selectedConqueror
+              bind:league
+              bind:cachedJewels
+              bind:poeSessId
+              bind:showMarketPanel
+              bind:showMarketSettings
+              bind:filteredMarketJewels
+              onConquerorChange={updateUrl}
+              onseedselect={({ seed: s, worshipper }) => {
+                seed = s;
+                selectedConqueror = { value: worshipper, label: worshipper };
+                mode = 'seed';
+                updateUrl();
+              }} />
           {/if}
         {/if}
 

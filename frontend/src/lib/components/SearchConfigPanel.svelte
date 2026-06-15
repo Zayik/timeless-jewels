@@ -11,7 +11,6 @@
 
   type Props = {
     selectedJewel: { value: number; label: string };
-    conquerors: { value: string; label: string }[];
     affectedNodes: Node[];
     circledNode: number | undefined;
     seedResults: { node: number; result: AlternatePassiveSkillInformation }[];
@@ -51,7 +50,6 @@
 
   let {
     selectedJewel,
-    conquerors,
     affectedNodes,
     circledNode,
     seedResults,
@@ -248,11 +246,6 @@
     onUpdateUrl();
   };
 </script>
-
-<div class="mt-4">
-  <h3 class="mb-2">Conqueror</h3>
-  <Select items={conquerors} bind:value={selectedConqueror} on:change={onUpdateUrl} />
-</div>
 
 {#if validConqueror}
   <div class="mt-4 w-full flex flex-row">

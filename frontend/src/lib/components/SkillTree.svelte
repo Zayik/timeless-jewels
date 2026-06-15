@@ -22,7 +22,6 @@
   export let circledNode: number | undefined;
 
   export let selectedJewel: number;
-  export let selectedConqueror: string;
   export let seed: number;
   export let highlighted: number[] = [];
   export let disabled: number[] = [];
@@ -339,31 +338,42 @@
       }));
 
       if (!hoveredNode.isJewelSocket && hoveredNodeActive) {
-        if (hoveredNode.skill && seed && selectedJewel && selectedConqueror) {
-          const result = calculator.Calculate(
-            data.TreeToPassive[hoveredNode.skill].Index,
-            seed,
-            selectedJewel,
-            selectedConqueror
-          );
+        const passive = hoveredNode.skill ? data.TreeToPassive[hoveredNode.skill] : undefined;
+        const conquerorMap = selectedJewel ? data.TimelessJewelConquerors[selectedJewel] : undefined;
 
-          if (result) {
+        if (passive && seed && selectedJewel && conquerorMap) {
+          // Conqueror only changes the outcome for keystones — notables and small
+          // passives roll off graphID+seed alone. So compute every conqueror,
+          // dedupe identical results, and label each distinct variant with the
+          // conqueror(s) that produce it. Non-keystones collapse to one variant.
+          type Variant = { name: string; stats: { text: string; special: boolean }[]; conquerors: string[] };
+          const variants: Variant[] = [];
+
+          for (const conqueror of Object.keys(conquerorMap)) {
+            const result = calculator.Calculate(passive.Index, seed, selectedJewel, conqueror);
+            if (!result) {
+              continue;
+            }
+
+            let vName = hoveredNode.name;
+            let vStats: { text: string; special: boolean }[];
+
             if ('AlternatePassiveSkill' in result && result.AlternatePassiveSkill) {
-              nodeStats = [];
-              nodeName = result.AlternatePassiveSkill.Name;
-
+              // Replacement: the node becomes a different skill entirely.
+              vName = result.AlternatePassiveSkill.Name;
+              vStats = [];
               if ('StatsKeys' in result.AlternatePassiveSkill) {
                 result.AlternatePassiveSkill.StatsKeys.forEach((statId, i) => {
                   const stat = data.GetStatByIndex(statId);
                   const translation = inverseTranslations[stat.ID] || '';
                   if (translation) {
-                    nodeStats.push({
-                      text: formatStats(translation, result.StatRolls[i]) || stat.ID,
-                      special: true
-                    });
+                    vStats.push({ text: formatStats(translation, result.StatRolls[i]) || stat.ID, special: true });
                   }
                 });
               }
+            } else {
+              // Augment: the node keeps its base stats and gains additions.
+              vStats = (hoveredNode.stats || []).map((s) => ({ text: s, special: false }));
             }
 
             if (result.AlternatePassiveAdditionInformations) {
@@ -373,15 +383,37 @@
                     const stat = data.GetStatByIndex(statId);
                     const translation = inverseTranslations[stat.ID] || '';
                     if (translation) {
-                      nodeStats.push({
-                        text: formatStats(translation, info.StatRolls[i]) || stat.ID,
-                        special: true
-                      });
+                      vStats.push({ text: formatStats(translation, info.StatRolls[i]) || stat.ID, special: true });
                     }
                   });
                 }
               });
             }
+
+            const key = vName + '|' + vStats.map((s) => s.text).join('|');
+            const existing = variants.find((v) => v.name + '|' + v.stats.map((s) => s.text).join('|') === key);
+            if (existing) {
+              existing.conquerors.push(conqueror);
+            } else {
+              variants.push({ name: vName, stats: vStats, conquerors: [conqueror] });
+            }
+          }
+
+          if (variants.length === 1) {
+            // Identical across all conquerors — show it plainly.
+            nodeName = variants[0].name;
+            nodeStats = variants[0].stats;
+          } else if (variants.length > 1) {
+            // Distinct per conqueror (keystone) — keep the base node name as the
+            // title and list each variant under the conqueror(s) that yield it.
+            nodeStats = [];
+            variants.forEach((v, idx) => {
+              if (idx > 0) {
+                nodeStats.push({ text: '', special: false });
+              }
+              nodeStats.push({ text: v.conquerors.join(', ') + ' → ' + v.name, special: true });
+              v.stats.forEach((s) => nodeStats.push(s));
+            });
           }
         }
       }
