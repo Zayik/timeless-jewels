@@ -16,6 +16,7 @@
     toCanvasCoords
   } from '../skill_tree';
   import type { Point } from '../skill_tree';
+  import { KEYSTONE_DESCRIPTIONS } from '../keystone_descriptions';
   import { calculator, data } from '../types';
 
   export let clickNode: (node: Node) => void;
@@ -362,7 +363,12 @@
               // Replacement: the node becomes a different skill entirely.
               vName = result.AlternatePassiveSkill.Name;
               vStats = [];
-              if ('StatsKeys' in result.AlternatePassiveSkill) {
+              if (hoveredNode.isKeystone) {
+                // Keystone replacements carry only a name-marker stat, so the
+                // translated stat just repeats the keystone name. Use the real
+                // effect text from the curated keystone map instead.
+                vStats = (KEYSTONE_DESCRIPTIONS[vName] ?? []).map((s) => ({ text: s, special: true }));
+              } else if ('StatsKeys' in result.AlternatePassiveSkill) {
                 result.AlternatePassiveSkill.StatsKeys.forEach((statId, i) => {
                   const stat = data.GetStatByIndex(statId);
                   const translation = inverseTranslations[stat.ID] || '';
