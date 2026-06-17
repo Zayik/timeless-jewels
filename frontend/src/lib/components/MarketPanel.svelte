@@ -6,6 +6,8 @@
   import type { MarketJewel } from '$lib/market_cache';
   import { data } from '$lib/types';
   import { getAlternatePassiveSkillKeyStone } from '$lib/calculator/data';
+  import { skillTree } from '$lib/skill_tree';
+  import { KEYSTONE_DESCRIPTIONS } from '$lib/keystone_descriptions';
   import { getPoeSessionId, setPoeSessionId, getShowMarketPanel, setShowMarketPanel } from '$lib/storageManager';
 
   type Props = {
@@ -39,16 +41,33 @@
   }: Props = $props();
 
   // What each conqueror does: the only thing a conqueror changes is the keystone
-  // its jewel grants (notables/small passives are conqueror-independent). The
-  // keystone name is the meaningful descriptor — its alt-passive "stat" is just
-  // the keystone itself, so there's no extra effect text to surface here.
-  const conquerorKeystones = $derived(
-    conquerors.map((c) => {
+  // its jewel grants (notables/small passives are conqueror-independent). Prefer
+  // the keystone's live effect text from the matching base-tree node (by name);
+  // most jewel keystones aren't tree nodes, so fall back to the wiki-sourced
+  // KEYSTONE_DESCRIPTIONS map.
+  const conquerorKeystones = $derived.by(() => {
+    const effectsByName = new Map<string, string[]>();
+    if (skillTree?.nodes) {
+      for (const id in skillTree.nodes) {
+        const n = skillTree.nodes[id];
+        if (n.isKeystone && n.name && n.stats?.length) {
+          // Tree nodes pack multiple mods into one string with embedded newlines;
+          // split so each mod renders on its own line like the curated entries.
+          effectsByName.set(n.name, n.stats.flatMap((s) => s.split('\n')).filter(Boolean));
+        }
+      }
+    }
+    return conquerors.map((c) => {
       const info = data.TimelessJewelConquerors[selectedJewel.value]?.[c.value];
       const ks = info ? getAlternatePassiveSkillKeyStone(selectedJewel.value, info.Index, info.Version) : undefined;
-      return { name: c.value, keystone: ks?.Name };
-    })
-  );
+      const name = ks?.Name;
+      return {
+        name: c.value,
+        keystone: name,
+        effects: name ? (effectsByName.get(name) ?? KEYSTONE_DESCRIPTIONS[name] ?? []) : []
+      };
+    });
+  });
 
   // Internal state
   let showSessionHelp = $state(false);
@@ -212,11 +231,16 @@
           <div class="mt-2 space-y-1 text-xs">
             <span class="text-gray-400">Each conqueror grants a keystone:</span>
             {#each conquerorKeystones as ck}
-              <div class="flex flex-row justify-between rounded bg-gray-900/60 p-1.5">
-                <span class="font-semibold text-orange-300">{ck.name}</span>
-                {#if ck.keystone}
-                  <span class="text-gray-200">{ck.keystone}</span>
-                {/if}
+              <div class="rounded bg-gray-900/60 p-1.5">
+                <div class="flex flex-row justify-between">
+                  <span class="font-semibold text-orange-300">{ck.name}</span>
+                  {#if ck.keystone}
+                    <span class="text-gray-200">{ck.keystone}</span>
+                  {/if}
+                </div>
+                {#each ck.effects as effect}
+                  <div class="mt-0.5 text-gray-400">{effect}</div>
+                {/each}
               </div>
             {/each}
           </div>
