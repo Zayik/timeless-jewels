@@ -15,7 +15,7 @@
     MassSearchResults,
     SearchResults as SearchResultsData
   } from '../lib/skill_tree';
-  import SearchResults from '../lib/components/SearchResults.svelte';
+  import ResultsPanel from '../lib/components/ResultsPanel.svelte';
   import MarketPanel from '../lib/components/MarketPanel.svelte';
   import SearchConfigPanel from '../lib/components/SearchConfigPanel.svelte';
   import { data, calculator } from '../lib/types';
@@ -826,73 +826,26 @@
           {/if}
         {/if}
 
-        {#if searchResults && results}
-          <SearchResults
+        {#if results}
+          <ResultsPanel
             {searchResults}
+            {massSearchResults}
             {groupResults}
-            {highlight}
             jewel={searchJewel}
             conqueror={searchConqueror}
             platform={platform.value}
-            league={league.value} />
-        {/if}
-
-        {#if massSearchResults && results}
-          {@const hasMassResults = Object.values(massSearchResults.resultsBySocket).some((s) => s.raw.length > 0)}
-          {#if !hasMassResults}
-            <div class="mt-8 text-center text-lg text-neutral-300">No results found.</div>
-          {:else}
-            <div class="mt-4 flex flex-col overflow-auto">
-              {#each Object.keys(massSearchResults.resultsBySocket)
-                .flatMap((s) => Object.keys(massSearchResults.resultsBySocket[s].grouped))
-                .filter((v, i, a) => a.indexOf(v) === i)
-                .sort((a, b) => parseInt(b) - parseInt(a)) as matchCount}
-                <div class="mt-4">
-                  <h3 class="text-2xl font-bold mb-2 text-white">{matchCount} Matches</h3>
-                  {#each Object.keys(massSearchResults.resultsBySocket) as socketId}
-                    {#if massSearchResults.resultsBySocket[socketId].grouped[matchCount] && massSearchResults.resultsBySocket[socketId].grouped[matchCount].length > 0}
-                      <div class="mt-2 border-t pt-2 border-white/20">
-                        <div
-                          class="text-xl font-bold text-orange-400 cursor-pointer mb-2"
-                          tabindex="0"
-                          role="button"
-                          onkeydown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              circledNode = parseInt(socketId);
-                              skillTreeComponent.centerOnNode(parseInt(socketId));
-                              updateUrl();
-                            }
-                          }}
-                          onclick={() => {
-                            circledNode = parseInt(socketId);
-                            skillTreeComponent.centerOnNode(parseInt(socketId));
-                            updateUrl();
-                          }}>
-                          {skillTree.nodes[parseInt(socketId)]?.name || 'Jewel Socket'} ({socketId})
-                        </div>
-                        <SearchResults
-                          searchResults={{
-                            grouped: { [matchCount]: massSearchResults.resultsBySocket[socketId].grouped[matchCount] },
-                            raw: massSearchResults.resultsBySocket[socketId].grouped[matchCount]
-                          }}
-                          highlight={(resultSeed, passives) => {
-                            circledNode = parseInt(socketId);
-                            highlight(resultSeed, passives);
-                            skillTreeComponent.centerOnNode(parseInt(socketId));
-                          }}
-                          groupResults={true}
-                          jewel={searchJewel}
-                          conqueror={searchConqueror}
-                          platform={platform.value}
-                          league={league.value} />
-                      </div>
-                    {/if}
-                  {/each}
-                </div>
-              {/each}
-            </div>
-          {/if}
+            league={league.value}
+            onHighlight={highlight}
+            onMassSelect={(socketId, resultSeed, passives) => {
+              circledNode = socketId;
+              highlight(resultSeed, passives);
+              skillTreeComponent.centerOnNode(socketId);
+            }}
+            onSocketFocus={(socketId) => {
+              circledNode = socketId;
+              skillTreeComponent.centerOnNode(socketId);
+              updateUrl();
+            }} />
         {/if}
       </div>
     </div>
