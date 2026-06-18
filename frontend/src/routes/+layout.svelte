@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.scss';
   import { browser } from '$app/environment';
+  import { base } from '$app/paths';
   import { loadSkillTree } from '../lib/skill_tree';
   import { syncWrap } from '../lib/worker';
   import { initializeCrystalline } from '../lib/types';
@@ -9,7 +10,7 @@
   let wasmLoading = $state(true);
 
   if (browser) {
-    initializeCrystalline().then(() => {
+    initializeCrystalline(base).then(() => {
       loadSkillTree();
       wasmLoading = false;
       syncWrap?.boot();

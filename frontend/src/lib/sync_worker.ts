@@ -10,8 +10,8 @@ import type {
 import { calculator, initializeCrystalline } from './types';
 
 const obj = {
-  async boot() {
-    await initializeCrystalline();
+  async boot(basePath = '') {
+    await initializeCrystalline(basePath);
     loadSkillTree();
   },
   async search(args: ReverseSearchConfig, callback: (seed: number) => void): Promise<SearchResults> {

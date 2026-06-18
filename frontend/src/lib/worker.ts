@@ -1,4 +1,5 @@
 ﻿import { browser } from '$app/environment';
+import { base } from '$app/paths';
 import SyncWorker from './sync_worker?worker';
 import * as Comlink from 'comlink';
 import type { WorkerType } from './sync_worker';
@@ -95,7 +96,7 @@ export const syncWrap = browser
         const BATCH_SIZE = 2;
         for (let i = 0; i < pool.length; i += BATCH_SIZE) {
           const batch = pool.slice(i, i + BATCH_SIZE);
-          await Promise.all(batch.map((w) => w.syncWrap.boot()));
+          await Promise.all(batch.map((w) => w.syncWrap.boot(base)));
         }
       },
       search: async (args: ReverseSearchConfig, callback: (seed: number) => void): Promise<SearchResults> => {
