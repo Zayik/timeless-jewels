@@ -1,6 +1,7 @@
 // Data loader - replaces Go WASM data package.
-// Fetches 10 JSON.gz files from /data/, decompresses them, builds lookup maps.
+// Fetches 10 JSON.gz files from <base>/data/, decompresses them, builds lookup maps.
 
+import { base as basePath } from '$app/paths';
 import type {
   PassiveSkill,
   AlternatePassiveSkill,
@@ -399,7 +400,10 @@ export async function initializeData(): Promise<void> {
 }
 
 async function _doInitialize(): Promise<void> {
-  const base = '/data';
+  // Use SvelteKit's configured base path so data resolves correctly when the
+  // site is served under a sub-path (e.g. GitHub Pages at /timeless-jewels/).
+  // Works in both the main thread and the web workers that also load data.
+  const base = `${basePath}/data`;
 
   const [
     rawAPS,
