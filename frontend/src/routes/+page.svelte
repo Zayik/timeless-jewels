@@ -760,8 +760,14 @@
             </h3>
 
             {#if (searchResults || massSearchResults) && results}
-              <Select items={leagues} bind:value={league} on:change={updateUrl} clearable={false} />
-              <Select items={platforms} bind:value={platform} on:change={updateUrl} clearable={false} />
+              <!-- svelte-select fills its container, so constrain each so they sit
+                   inline beside the title instead of each taking a full row -->
+              <div class="w-36 shrink-0">
+                <Select items={leagues} bind:value={league} on:change={updateUrl} clearable={false} />
+              </div>
+              <div class="w-28 shrink-0">
+                <Select items={platforms} bind:value={platform} on:change={updateUrl} clearable={false} />
+              </div>
               <button
                 class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40 disabled:cursor-not-allowed"
                 disabled={tradeResults.length === 0}
