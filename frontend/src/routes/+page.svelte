@@ -718,7 +718,7 @@
   disabled={[...disabled]}>
   {#if !collapsed}
     <div
-      class="w-screen md:w-10/12 lg:w-2/3 xl:w-1/2 2xl:w-5/12 3xl:w-1/3 4xl:w-1/4 min-w-[820px] absolute top-0 left-0 bg-black/80 backdrop-blur-sm themed rounded-br-lg max-h-screen">
+      class="w-screen md:w-10/12 lg:w-2/3 xl:w-1/2 2xl:w-5/12 3xl:w-1/3 4xl:w-1/4 lg:min-w-[820px] max-w-full absolute top-0 left-0 bg-black/80 backdrop-blur-sm themed rounded-br-lg max-h-screen">
       <div class="p-4 max-h-screen flex flex-col">
         <div class="flex flex-row justify-between mb-2">
           <div class="flex flex-row items-center">
@@ -737,7 +737,7 @@
             </h3>
           </div>
           {#if searchResults || massSearchResults}
-            <div class="flex flex-row gap-2">
+            <div class="flex flex-row flex-wrap items-center justify-end gap-2">
               {#if results}
                 <Select items={leagues} bind:value={league} on:change={updateUrl} clearable={false} />
                 <Select items={platforms} bind:value={platform} on:change={updateUrl} clearable={false} />
