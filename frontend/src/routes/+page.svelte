@@ -200,6 +200,29 @@
   };
 
   let searchResults = $state<SearchResultsData | undefined>(undefined);
+
+  // All matching seeds for the current search, for the "Trade all results" button.
+  // Single search → its raw list; mass search → every socket's seeds, deduped.
+  const tradeResults = $derived.by<{ seed: number }[]>(() => {
+    if (searchResults) {
+      return searchResults.raw;
+    }
+    if (massSearchResults) {
+      const seen = new Set<number>();
+      const out: { seed: number }[] = [];
+      for (const socket of Object.values(massSearchResults.resultsBySocket)) {
+        for (const r of socket.raw) {
+          if (!seen.has(r.seed)) {
+            seen.add(r.seed);
+            out.push(r);
+          }
+        }
+      }
+      return out;
+    }
+    return [];
+  });
+
   const search = () => {
     if (!circledNode) {
       return;
@@ -720,41 +743,43 @@
     <div
       class="w-screen md:w-10/12 lg:w-2/3 xl:w-1/2 2xl:w-5/12 3xl:w-1/3 4xl:w-1/4 lg:min-w-[820px] max-w-full absolute top-0 left-0 bg-black/80 backdrop-blur-sm themed rounded-br-lg max-h-screen">
       <div class="p-4 max-h-screen flex flex-col">
-        <div class="flex flex-row justify-between mb-2">
-          <div class="flex flex-row items-center">
-            <button class="burger-menu mr-3" aria-label="Collapse panel" onclick={() => (collapsed = true)}>
+        <div class="flex flex-row flex-wrap justify-between items-center gap-2 mb-2">
+          <div class="flex flex-row flex-wrap items-center gap-2">
+            <button class="burger-menu" aria-label="Collapse panel" onclick={() => (collapsed = true)}>
               <div></div>
               <div></div>
               <div></div>
             </button>
 
-            <h3 class="flex-grow">
+            <h3>
               {#if results}
                 <span>Results</span>
               {:else}
                 <span>Timeless Jewel</span>
               {/if}
             </h3>
+
+            {#if (searchResults || massSearchResults) && results}
+              <Select items={leagues} bind:value={league} on:change={updateUrl} clearable={false} />
+              <Select items={platforms} bind:value={platform} on:change={updateUrl} clearable={false} />
+              <button
+                class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40 disabled:cursor-not-allowed"
+                disabled={tradeResults.length === 0}
+                title="Open the trade site prefilled with all matching jewels"
+                onclick={() => openTrade(searchJewel, searchConqueror, tradeResults, platform.value, league.value)}>
+                Trade
+              </button>
+            {/if}
           </div>
           {#if searchResults || massSearchResults}
-            <div class="flex flex-row flex-wrap items-center justify-end gap-2">
-              {#if results}
-                <Select items={leagues} bind:value={league} on:change={updateUrl} clearable={false} />
-                <Select items={platforms} bind:value={platform} on:change={updateUrl} clearable={false} />
-                {#if searchResults}
-                  <button
-                    class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40"
-                    onclick={() =>
-                      openTrade(searchJewel, searchConqueror, searchResults.raw, platform.value, league.value)}>
-                    Trade
-                  </button>
-                  <button
-                    class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40"
-                    class:grouped={groupResults}
-                    onclick={() => (groupResults = !groupResults)}>
-                    Grouped
-                  </button>
-                {/if}
+            <div class="flex flex-row items-center gap-2">
+              {#if results && searchResults}
+                <button
+                  class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40"
+                  class:grouped={groupResults}
+                  onclick={() => (groupResults = !groupResults)}>
+                  Grouped
+                </button>
               {/if}
               <button class="bg-neutral-100/20 px-4 p-1 rounded" onclick={() => (results = !results)}>
                 {results ? 'Config' : 'Results'}
