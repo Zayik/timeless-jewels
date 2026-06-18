@@ -13,22 +13,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: 'frontend/.nvmrc'
 
       - name: Enable corepack
         run: corepack enable
-
-      - name: Build wasm
-        run: go build -ldflags="-s -w" -v -o frontend/static/calculator.wasm ./wasm
-        env:
-          GOOS: js
-          GOARCH: wasm
 
       - name: Build frontend
         working-directory: frontend
