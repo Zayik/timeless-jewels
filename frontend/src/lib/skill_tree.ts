@@ -1,5 +1,14 @@
 import type { Translation, Node, SkillTreeData, Group, Sprite, TranslationFile } from './skill_tree_types';
+import type { PassiveSkill } from './calculator/types';
 import { data } from './types';
+import { treeToPassive } from './calculator/data';
+import {
+  buildPoe2Tree,
+  POE2_JEWEL_RADIUS,
+  POE2_SPRITE_DRAW_SCALE,
+  type Poe2Connection,
+  type Poe2EffectNode
+} from './poe2/skill_tree_adapter';
 
 const SPRITE_SCALE = '0.3835';
 
@@ -14,6 +23,33 @@ export const inverseSpritesActive: Record<string, Sprite> = {};
 export const inverseTranslations: Record<string, Translation> = {};
 
 export const passiveToTree: Record<number, number> = {};
+
+// `let` (not const) so the PoE2 loader can widen the radius for PoE2's jewels.
+export let baseJewelRadius = 1800;
+
+// Display scale applied to sprite source rects in SkillTree.svelte's drawSprite.
+// PoE1 default is 2.6; the PoE2 loader retunes it for PoE2 atlas/spacing.
+export let spriteDrawScale = 2.6;
+
+// PoE2 skill icons are opaque square images (the art has a square background), so
+// they must be clipped to a circle to read as round nodes (PoE1 icons are
+// transparent glyphs and don't need this). The PoE2 loader turns this on.
+export let clipNodeIcons = false;
+
+// PoE2 connector list (from the export's edge data). When non-empty the renderer
+// drives connections from this (authoritative arc/line info) instead of PoE1's
+// node.out + group/orbit geometry. Empty for PoE1.
+export let connections: Poe2Connection[] = [];
+
+// When true, the node tooltip appends raw node data (id, group, orbit, …) for
+// debugging the PoE2 tree. Off for PoE1.
+export let debugNodeInfo = false;
+
+// PoE2 effect-backdrop nodes (decorative): masteries + themed notables/smalls, each
+// with activeEffectImage = a pattern drawn behind it. Lit when one of its governing
+// notables is in the jewel radius and enabled, dim when all are disabled or out of
+// radius (see Poe2EffectNode). Empty for PoE1.
+export let effectNodes: Poe2EffectNode[] = [];
 
 function indexSprites(sprite: Sprite, map: Record<string, Sprite>): void {
   Object.keys(sprite.coords).forEach((c) => (map[c] = sprite));
@@ -94,6 +130,60 @@ export const loadSkillTree = () => {
   Object.keys(data.TreeToPassive).forEach((k) => {
     passiveToTree[data.TreeToPassive[parseInt(k)].Index] = parseInt(k);
   });
+};
+
+const replaceRecord = <T>(target: Record<string | number, T>, source: Record<string | number, T>): void => {
+  for (const k of Object.keys(target)) {
+    delete target[k];
+  }
+  Object.assign(target, source);
+};
+
+/**
+ * PoE2 equivalent of loadSkillTree(): builds the singletons the canvas renderer
+ * reads (skillTree, drawnNodes/Groups, inverseSprites) from the adapted PoE2
+ * export. No translations/passive maps — PoE2 nodes carry their own stat strings
+ * and search is not wired yet.
+ */
+export const loadSkillTreePoe2 = async (basePath = ''): Promise<void> => {
+  const bundle = await buildPoe2Tree(basePath);
+  skillTree = bundle.skillTree;
+  replaceRecord(drawnNodes, bundle.drawnNodes);
+  replaceRecord(drawnGroups, bundle.drawnGroups);
+  replaceRecord(inverseSprites, bundle.inverseSprites);
+  replaceRecord(inverseSpritesActive, bundle.inverseSpritesActive);
+  baseJewelRadius = POE2_JEWEL_RADIUS;
+  spriteDrawScale = POE2_SPRITE_DRAW_SCALE;
+  clipNodeIcons = true;
+  connections = bundle.connections;
+  debugNodeInfo = true;
+  effectNodes = bundle.effectNodes;
+
+  // The shared page/components look passives up via data.TreeToPassive[node.skill]
+  // and use the .Index when building search queries. PoE2 has no go-pob-data, so
+  // provide identity-style PassiveSkill stubs keyed by the node's graph id.
+  replaceRecord(
+    treeToPassive,
+    Object.fromEntries(
+      Object.values(bundle.skillTree.nodes)
+        .filter((n): n is Node & { skill: number } => typeof n.skill === 'number')
+        .map((n) => [
+          n.skill,
+          {
+            Index: n.skill,
+            ID: n.id ?? String(n.skill),
+            StatIndices: [],
+            PassiveSkillGraphID: n.skill,
+            Name: n.name ?? '',
+            IsKeystone: !!n.isKeystone,
+            IsNotable: !!n.isNotable,
+            IsJewelSocket: !!n.isJewelSocket
+          } as PassiveSkill
+        ])
+    )
+  );
+
+  console.log('Loaded PoE2 skill tree', skillTree);
 };
 
 const indexHandlers: Record<string, number> = {
@@ -185,6 +275,12 @@ export const orbitAngleAt = (orbit: number, index: number): number => {
 };
 
 export const calculateNodePos = (node: Node, offsetX: number, offsetY: number, scaling: number): Point => {
+  // PoE2 nodes carry absolute coordinates — use them directly and skip the
+  // group/orbit math. PoE1 nodes have no x/y, so this branch never triggers there.
+  if (node.x !== undefined && node.y !== undefined) {
+    return toCanvasCoords(node.x, node.y, offsetX, offsetY, scaling);
+  }
+
   if (node.group === undefined || node.orbit === undefined || node.orbitIndex === undefined) {
     return { x: 0, y: 0 };
   }
@@ -264,8 +360,6 @@ export const formatStats = (translation: Translation, stat: number): string | un
     .replace(/\{0(?::(.*?)d(.*?))\}/, '$1' + finalStat.toString() + '$2')
     .replace(`{0}`, parseFloat(finalStat.toFixed(2)).toString());
 };
-
-export const baseJewelRadius = 1800;
 
 export const getAffectedNodes = (socket: Node): Node[] => {
   const result: Node[] = [];

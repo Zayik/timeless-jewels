@@ -104,6 +104,11 @@ export interface Node {
   isMultipleChoiceOption?: boolean;
   isBlighted?: boolean;
   classStartIndex?: number;
+  // PoE2 export carries absolute node coordinates and an ascendancyId; PoE1 omits
+  // both (positions are computed from group/orbit). See skill_tree_adapter.ts.
+  x?: number;
+  y?: number;
+  ascendancyId?: string;
 }
 
 export interface Points {
