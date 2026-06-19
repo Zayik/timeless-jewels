@@ -16,6 +16,12 @@ const config = {
           Origin: 'https://www.pathofexile.com',
           Referer: 'https://www.pathofexile.com/'
         }
+      },
+      // PoE2 community dataset is only reachable through the Cloudflare Worker
+      // (Neon-backed). In dev, forward to a local `wrangler dev` on :8787.
+      '/api/poe2': {
+        target: 'http://localhost:8787',
+        changeOrigin: true
       }
     }
   },
