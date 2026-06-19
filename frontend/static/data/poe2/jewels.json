@@ -1,0 +1,86 @@
+[
+  {
+    "id": 1,
+    "key": "heroic_tragedy",
+    "name": "Heroic Tragedy",
+    "seedMin": 100,
+    "seedMax": 8000,
+    "conqueredBy": "Kalguur",
+    "transforms": "notables",
+    "variants": [
+      {
+        "name": "Vorana",
+        "keystone": "Black Scythe Training",
+        "keystoneId": "kalguur_keystone_1",
+        "keystoneStats": ["Gain no inherent bonus from Strength", "1% increased Energy Shield per 2 Strength"]
+      },
+      {
+        "name": "Medved",
+        "keystone": "Circular Teachings",
+        "keystoneId": "kalguur_keystone_2",
+        "keystoneStats": ["Gain no inherent bonus from Dexterity", "1% increased Armour per 2 Dexterity"]
+      },
+      {
+        "name": "Olroth",
+        "keystone": "Knightly Tenets",
+        "keystoneId": "kalguur_keystone_3",
+        "keystoneStats": ["Gain no inherent bonus from Intelligence", "1% increased Evasion Rating per 2 Intelligence"]
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "key": "undying_hate",
+    "name": "Undying Hate",
+    "seedMin": 79,
+    "seedMax": 30977,
+    "conqueredBy": "Abyssal",
+    "transforms": "small+notables",
+    "variants": [
+      {
+        "name": "Amanamu",
+        "keystone": "Sacrifice of Flesh",
+        "keystoneId": "abyss_keystone_1",
+        "keystoneStats": [
+          "When taking damage from Hits, 20% of Life Loss is prevented, then 150% of Life Loss prevented this way is Lost over 4 seconds"
+        ]
+      },
+      {
+        "name": "Ulaman",
+        "keystone": "Sacrifice of Sight",
+        "keystoneId": "abyss_keystone_5",
+        "keystoneStats": [
+          "Projectiles do one of the following at random:",
+          "• Fork an additional time",
+          "• Chain an additional time",
+          "• Chain from Terrain an additional time",
+          "• Cannot collide with targets"
+        ]
+      },
+      {
+        "name": "Kurgal",
+        "keystone": "Sacrifice of Mind",
+        "keystoneId": "abyss_keystone_3",
+        "keystoneStats": ["Mana Recovery from Regeneration Overflows maximum Mana", "50% less Mana Regeneration Rate"]
+      },
+      {
+        "name": "Tecrod",
+        "keystone": "Sacrifice of Blood",
+        "keystoneId": "abyss_keystone_4",
+        "keystoneStats": [
+          "Regenerate 1 Life per second per 16 Life spent in the past 4 seconds",
+          "20% more Life Cost of Skills"
+        ]
+      },
+      {
+        "name": "Kulemak",
+        "keystone": "Sacrifice of Loyalty",
+        "keystoneId": "abyss_keystone_2",
+        "keystoneStats": [
+          "You deal 1% more Damage per 2 total Power of your Undead Minions",
+          "Undead Minions have 25% less maximum Life"
+        ]
+      }
+    ]
+  }
+]
