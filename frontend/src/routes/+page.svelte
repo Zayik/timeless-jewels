@@ -31,6 +31,7 @@
   import { openLiveSearch } from '$lib/trade_api';
   import { setCachedJewels } from '$lib/market_cache';
   import type { MarketJewel } from '$lib/market_cache';
+  import { SvelteSet } from 'svelte/reactivity';
 
   const searchParams = $page.url.searchParams;
 
@@ -116,8 +117,11 @@
 
   let mode = $state(searchParams.has('mode') ? searchParams.get('mode') : '');
 
-  // $state(new Set()) makes all mutations (add/delete/clear) reactive automatically.
-  let disabled = $state(new Set<number>());
+  // SvelteSet so add/delete/clear are reactive (a plain Set is NOT proxied by $state,
+  // so mutations wouldn't re-render the tree / dim nodes). Wrapped in $state so the
+  // `disabled={[...disabled]}` prop expression stays in a tracked context and isn't
+  // hoisted as a constant — the spread then re-runs on every SvelteSet mutation.
+  let disabled = $state(new SvelteSet<number>());
 
   const updateUrl = () => {
     const url = new URL(window.location.origin + window.location.pathname);
