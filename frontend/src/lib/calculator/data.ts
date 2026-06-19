@@ -14,6 +14,7 @@ import type {
   Range
 } from './types';
 import { PassiveSkillType } from './types';
+import { loadPoe2JewelData, getPoe2Jewels, getPoe2Notables } from '../poe2/jewel_data';
 
 // ---- Module-level storage (populated by initializeData) ----
 
@@ -55,8 +56,7 @@ export const JewelType = {
   LethalPride: 2,
   BrutalRestraint: 3,
   MilitantFaith: 4,
-  ElegantHubris: 5,
-  HeroicTragedy: 6
+  ElegantHubris: 5
 } as const;
 
 const TIMELESS_JEWELS: Record<number, string> = {
@@ -64,8 +64,7 @@ const TIMELESS_JEWELS: Record<number, string> = {
   2: 'Lethal Pride',
   3: 'Brutal Restraint',
   4: 'Militant Faith',
-  5: 'Elegant Hubris',
-  6: 'Heroic Tragedy'
+  5: 'Elegant Hubris'
 };
 
 // Matches data/jewels.go TimelessJewelConquerors exactly
@@ -104,12 +103,6 @@ const TIMELESS_JEWEL_CONQUERORS: Record<number, Record<string, TimelessJewelConq
     Victario: { Index: 2, Version: 0 },
     Chitus: { Index: 3, Version: 0 },
     Caspiro: { Index: 3, Version: 1 }
-  },
-  // HeroicTragedy = 6
-  6: {
-    Vorana: { Index: 1, Version: 0 },
-    Uhtred: { Index: 2, Version: 0 },
-    Medved: { Index: 3, Version: 0 }
   }
 };
 
@@ -119,8 +112,7 @@ const TIMELESS_JEWEL_SEED_RANGES: Record<number, Range> = {
   2: { Min: 10000, Max: 18000, Special: false }, // LethalPride
   3: { Min: 500, Max: 8000, Special: false }, // BrutalRestraint
   4: { Min: 2000, Max: 10000, Special: false }, // MilitantFaith
-  5: { Min: 2000, Max: 160000, Special: true }, // ElegantHubris
-  6: { Min: 100, Max: 8000, Special: false } // HeroicTragedy
+  5: { Min: 2000, Max: 160000, Special: true } // ElegantHubris
 };
 
 // ---- Helper functions (from data/manager.go) ----
@@ -563,6 +555,13 @@ async function _doInitialize(basePath: string): Promise<void> {
   _possibleStatsJSON = possibleStatsText;
 }
 
+// ---- Game-aware active jewel set (PoE1 by default; swapped by PoE2 init) ----
+
+let _activeTimelessJewels: Record<number, string> = TIMELESS_JEWELS;
+let _activeConquerors: Record<number, Record<string, TimelessJewelConqueror | undefined> | undefined> =
+  TIMELESS_JEWEL_CONQUERORS;
+let _activeSeedRanges: Record<number, Range> = TIMELESS_JEWEL_SEED_RANGES;
+
 // ---- Exported data object (matches index.d.ts API surface exactly) ----
 
 export const data = {
@@ -590,15 +589,79 @@ export const data = {
   get StatTranslationsJSON() {
     return _statTranslationsJSON;
   },
-  TimelessJewelConquerors: TIMELESS_JEWEL_CONQUERORS as Record<
-    number,
-    Record<string, TimelessJewelConqueror | undefined> | undefined
-  >,
-  TimelessJewelSeedRanges: TIMELESS_JEWEL_SEED_RANGES as Record<number, Range>,
-  TimelessJewels: TIMELESS_JEWELS as Record<number, string>,
+  // Jewel tables are game-aware: PoE1 by default, swapped to the PoE2 set by
+  // initializeCrystallinePoe2 (PoE1 and PoE2 are never active at the same time).
+  get TimelessJewelConquerors(): Record<number, Record<string, TimelessJewelConqueror | undefined> | undefined> {
+    return _activeConquerors;
+  },
+  get TimelessJewelSeedRanges(): Record<number, Range> {
+    return _activeSeedRanges;
+  },
+  get TimelessJewels(): Record<number, string> {
+    return _activeTimelessJewels;
+  },
   get TreeToPassive(): Record<number, PassiveSkill> {
     return treeToPassive;
   }
 };
 
 export { TIMELESS_JEWEL_SEED_RANGES, TIMELESS_JEWEL_CONQUERORS };
+
+// Per-jewel, per-conqueror keystone shown in the Market legend / tooltips. PoE1
+// resolves keystones via getAlternatePassiveSkillKeyStone; PoE2 has no PRNG, so
+// initializeCrystallinePoe2 fills this from the wiki-baked jewel data instead.
+export const conquerorKeystones: Record<number, Record<string, { name: string; effects: string[] }>> = {};
+
+/**
+ * Initialize the data layer for the PoE2 route: swap the jewel tables to the two
+ * PoE2 jewels (from the committed wiki data) and stub the PoE1-only pieces the
+ * shared components touch. The PoE2 calculator has no PRNG — search is wired to
+ * the (future) DB layer, and calculator.Calculate naturally returns {} because
+ * the PoE1 passive maps stay empty.
+ */
+export async function initializeCrystallinePoe2(basePath = ''): Promise<void> {
+  await loadPoe2JewelData(basePath);
+  const jewels = getPoe2Jewels();
+
+  const tj: Record<number, string> = {};
+  const conq: Record<number, Record<string, TimelessJewelConqueror>> = {};
+  const ranges: Record<number, Range> = {};
+  const possible: Record<number, Record<string, number>> = {};
+
+  // Build a searchable stat list per jewel from its notable pool's stat lines.
+  // PoE2 has no numeric stat ids, so synthesize ids (>= 900000, no PoE1 overlap)
+  // and register them in idToStat so the shared UI's translateStat() shows the
+  // human text and every search button (gated on a selected stat) is reachable.
+  let nextStatId = 900000;
+  const statIdByText = new Map<string, number>();
+
+  for (const j of jewels) {
+    tj[j.id] = j.name;
+    ranges[j.id] = { Min: j.seedMin, Max: j.seedMax, Special: false };
+    conq[j.id] = {};
+    conquerorKeystones[j.id] = {};
+    j.variants.forEach((v, i) => {
+      conq[j.id][v.name] = { Index: i + 1, Version: 0 };
+      conquerorKeystones[j.id][v.name] = { name: v.keystone, effects: v.keystoneStats };
+    });
+
+    const poss: Record<string, number> = {};
+    for (const notable of getPoe2Notables(j.id)) {
+      for (const line of notable.stats) {
+        let id = statIdByText.get(line);
+        if (id === undefined) {
+          id = nextStatId++;
+          statIdByText.set(line, id);
+          idToStat[id] = { Index: id, ID: `poe2_stat_${id}`, Text: line };
+        }
+        poss[id] = 1;
+      }
+    }
+    possible[j.id] = poss;
+  }
+
+  _activeTimelessJewels = tj;
+  _activeConquerors = conq;
+  _activeSeedRanges = ranges;
+  _possibleStatsJSON = JSON.stringify(possible);
+}

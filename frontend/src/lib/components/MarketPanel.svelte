@@ -5,7 +5,10 @@
   import { getCachedJewels, getCacheTime, setCachedJewels, clearCachedJewels } from '$lib/market_cache';
   import type { MarketJewel } from '$lib/market_cache';
   import { data } from '$lib/types';
-  import { getAlternatePassiveSkillKeyStone } from '$lib/calculator/data';
+  import {
+    getAlternatePassiveSkillKeyStone,
+    conquerorKeystones as conquerorKeystoneOverrides
+  } from '$lib/calculator/data';
   import { skillTree } from '$lib/skill_tree';
   import { KEYSTONE_DESCRIPTIONS } from '$lib/keystone_descriptions';
   import { getPoeSessionId, setPoeSessionId, getShowMarketPanel, setShowMarketPanel } from '$lib/storageManager';
@@ -58,6 +61,12 @@
       }
     }
     return conquerors.map((c) => {
+      // PoE2: keystones come from the wiki-baked override map (no PRNG). PoE1:
+      // resolve via the alternate-passive data + curated descriptions.
+      const override = conquerorKeystoneOverrides[selectedJewel.value]?.[c.value];
+      if (override) {
+        return { name: c.value, keystone: override.name, effects: override.effects };
+      }
       const info = data.TimelessJewelConquerors[selectedJewel.value]?.[c.value];
       const ks = info ? getAlternatePassiveSkillKeyStone(selectedJewel.value, info.Index, info.Version) : undefined;
       const name = ks?.Name;
