@@ -67,12 +67,13 @@ timeless-jewels/
 │           │   ├── data.ts        # fetch + DecompressionStream loader, lookup maps
 │           │   └── types.ts       # Core types: PassiveSkill, AlternatePassiveSkill, Stat
 │           ├── components/
-│           │   ├── SkillTree.svelte       # Canvas-based passive tree renderer
+│           │   ├── SkillTree.svelte       # Tree UI: drives the PixiTree engine + HTML tooltip/overlay
 │           │   ├── MarketPanel.svelte     # Trade API / live feed / seed list
 │           │   ├── SearchConfigPanel.svelte # Jewel/conqueror/stat selection + buttons
 │           │   ├── SearchResult.svelte
 │           │   └── SearchResults.svelte
-│           ├── skill_tree.ts      # Sprite loading, canvas math, node rendering
+│           ├── pixi_tree.ts       # PixiJS v8 (WebGL) renderer engine — batched sprites, pan/zoom via world transform
+│           ├── skill_tree.ts      # Sprite loading, node positions/maps, draw lists
 │           ├── skill_tree_types.ts # TypeScript types for tree structure
 │           ├── worker.ts          # Web Worker pool management via Comlink (cap: 8)
 │           ├── sync_worker.ts     # Per-worker search entry point

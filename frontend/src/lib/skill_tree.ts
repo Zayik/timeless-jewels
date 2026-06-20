@@ -19,6 +19,19 @@ export let skillTree: SkillTreeData;
 export const drawnGroups: Record<number, Group> = {};
 export const drawnNodes: Record<number, Node> = {};
 
+// Render-loop fast paths: the canvas redraws every animation frame, so it must not
+// call Object.keys()/Object.values() (fresh array allocation) on the maps above each
+// frame. These flat lists are rebuilt once at load time and iterated directly.
+export let drawnNodesList: Node[] = [];
+export let drawnGroupList: { id: number; group: Group }[] = [];
+
+// Unified connector list for the renderer. PoE2 supplies authoritative arc info via
+// `connections`; PoE1 derives it from node.out + group/orbit geometry. Either way it
+// is computed ONCE (the per-frame PoE1 path used to rebuild a dedup map and thousands
+// of "min:max" strings on every frame). Populated by rebuildDrawLists, defined below
+// `connections`.
+export let connectionList: { from: number; to: number; cx?: number; cy?: number }[] = [];
+
 export const inverseSprites: Record<string, Sprite> = {};
 export const inverseSpritesActive: Record<string, Sprite> = {};
 
@@ -57,6 +70,53 @@ export let debugNodeInfo = false;
 // notables is in the jewel radius and enabled, dim when all are disabled or out of
 // radius (see Poe2EffectNode). Empty for PoE1.
 export let effectNodes: Poe2EffectNode[] = [];
+
+// Rebuild the render-loop fast-path lists from the current draw maps. Called once after
+// each tree load (PoE1 and PoE2).
+function rebuildDrawLists(): void {
+  drawnNodesList = Object.values(drawnNodes);
+  drawnGroupList = Object.keys(drawnGroups).map((id) => ({ id: parseInt(id), group: drawnGroups[parseInt(id)] }));
+  rebuildConnectionList();
+}
+
+function rebuildConnectionList(): void {
+  // PoE2: arc/line shape is authoritative from the export — use it as-is.
+  if (connections.length > 0) {
+    connectionList = connections.map((c) => ({ from: c.from, to: c.to, cx: c.cx, cy: c.cy }));
+    return;
+  }
+
+  // PoE1: same group + same orbit → arc around the group centre, else straight line.
+  const seen = new Set<string>();
+  const list: { from: number; to: number; cx?: number; cy?: number }[] = [];
+  Object.keys(drawnNodes).forEach((nodeIdStr) => {
+    const nodeId = parseInt(nodeIdStr);
+    const node = drawnNodes[nodeId];
+    node.out?.forEach((o) => {
+      const targetId = parseInt(o);
+      const targetNode = drawnNodes[targetId];
+      if (!targetNode || targetNode.isMastery) {
+        return;
+      }
+      const min = Math.min(targetId, nodeId);
+      const max = Math.max(targetId, nodeId);
+      const joined = min + ':' + max;
+      if (seen.has(joined)) {
+        return;
+      }
+      seen.add(joined);
+
+      const sameArc =
+        node.group !== undefined &&
+        node.group === targetNode.group &&
+        node.orbit !== undefined &&
+        node.orbit === targetNode.orbit;
+      const group = sameArc ? drawnGroups[node.group as number] : undefined;
+      list.push({ from: nodeId, to: targetId, cx: group?.x, cy: group?.y });
+    });
+  });
+  connectionList = list;
+}
 
 function indexSprites(sprite: Sprite, map: Record<string, Sprite>): void {
   Object.keys(sprite.coords).forEach((c) => (map[c] = sprite));
@@ -137,6 +197,8 @@ export const loadSkillTree = () => {
   Object.keys(data.TreeToPassive).forEach((k) => {
     passiveToTree[data.TreeToPassive[parseInt(k)].Index] = parseInt(k);
   });
+
+  rebuildDrawLists();
 };
 
 const replaceRecord = <T>(target: Record<string | number, T>, source: Record<string | number, T>): void => {
@@ -191,6 +253,8 @@ export const loadSkillTreePoe2 = async (basePath = ''): Promise<void> => {
         ])
     )
   );
+
+  rebuildDrawLists();
 
   console.log('Loaded PoE2 skill tree', skillTree);
 };
@@ -283,29 +347,56 @@ export const orbitAngleAt = (orbit: number, index: number): number => {
   }
 };
 
-export const calculateNodePos = (node: Node, offsetX: number, offsetY: number, scaling: number): Point => {
+// A node's position in "pre-divide tree space" (absolute coords with the min_x/min_y
+// shift baked in, but BEFORE the pan offset and zoom divide) is constant — only the
+// pan/zoom change between frames. Computing it involves trig for PoE1 orbit nodes, so
+// memoise it per node and let the per-frame call do just the cheap affine transform.
+// The map is keyed by node identity; a tree reload swaps in fresh node objects, so the
+// old entries become unreachable and are GC'd (no manual invalidation needed).
+const nodeBaseCache = new WeakMap<Node, Point>();
+
+const computeNodeBase = (node: Node): Point => {
+  const ax = Math.abs(skillTree.min_x);
+  const ay = Math.abs(skillTree.min_y);
+
   // PoE2 nodes carry absolute coordinates — use them directly and skip the
   // group/orbit math. PoE1 nodes have no x/y, so this branch never triggers there.
   if (node.x !== undefined && node.y !== undefined) {
-    return toCanvasCoords(node.x, node.y, offsetX, offsetY, scaling);
+    return { x: ax + node.x, y: ay + node.y };
   }
 
   if (node.group === undefined || node.orbit === undefined || node.orbitIndex === undefined) {
-    return { x: 0, y: 0 };
+    // Malformed node — sentinel so calculateNodePos can keep the legacy {0,0} result.
+    return { x: NaN, y: NaN };
   }
 
   const targetGroup = skillTree.groups[node.group];
   const targetAngle = orbitAngleAt(node.orbit, node.orbitIndex);
 
-  const targetGroupPos = toCanvasCoords(targetGroup.x, targetGroup.y, offsetX, offsetY, scaling);
-  const targetNodePos = toCanvasCoords(
-    targetGroup.x,
-    targetGroup.y - skillTree.constants.orbitRadii[node.orbit],
-    offsetX,
-    offsetY,
-    scaling
-  );
-  return rotateAroundPoint(targetGroupPos, targetNodePos, targetAngle);
+  // Rotation is performed in pre-divide tree space; because toCanvasCoords is a uniform
+  // scale + translate, rotating here and converting afterwards is identical to rotating
+  // the already-converted canvas points (offset/zoom cancel out of the deltas).
+  const center: Point = { x: ax + targetGroup.x, y: ay + targetGroup.y };
+  const target: Point = {
+    x: ax + targetGroup.x,
+    y: ay + targetGroup.y - skillTree.constants.orbitRadii[node.orbit]
+  };
+  return rotateAroundPoint(center, target, targetAngle);
+};
+
+export const calculateNodePos = (node: Node, offsetX: number, offsetY: number, scaling: number): Point => {
+  let base = nodeBaseCache.get(node);
+  if (base === undefined) {
+    base = computeNodeBase(node);
+    nodeBaseCache.set(node, base);
+  }
+  if (Number.isNaN(base.x)) {
+    return { x: 0, y: 0 };
+  }
+  return {
+    x: (base.x + offsetX) / scaling,
+    y: (base.y + offsetY) / scaling
+  };
 };
 
 export const distance = (p1: Point, p2: Point): number =>
