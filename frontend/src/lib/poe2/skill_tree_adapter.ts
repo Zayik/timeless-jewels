@@ -75,6 +75,12 @@ export interface Poe2TreeBundle {
 // them). 2.3 keeps notables ~0.66x spacing with clear gaps; the GGG frame size
 // ratio (kept intact) makes smalls correspondingly smaller, as in the real tree.
 export const POE2_SPRITE_DRAW_SCALE = 2.3;
+// Per-type fine-tuning on top of the global scale (matched against poeplanner.com/poe2):
+// notables read a touch large at the GGG frame ratio, masteries' effect backdrop a
+// touch small, so nudge them. 1 = no change. Applied to the notable icon+frame and to
+// the mastery effect backdrop respectively in SkillTree.svelte.
+export const POE2_NOTABLE_DRAW_SCALE = 0.9;
+export const POE2_MASTERY_EFFECT_SCALE = 1.15;
 // PoE2 timeless jewels have a very large radius; tuned to cover a socket's cluster.
 export const POE2_JEWEL_RADIUS = 2800;
 

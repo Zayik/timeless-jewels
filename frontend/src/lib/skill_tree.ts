@@ -6,6 +6,8 @@ import {
   buildPoe2Tree,
   POE2_JEWEL_RADIUS,
   POE2_SPRITE_DRAW_SCALE,
+  POE2_NOTABLE_DRAW_SCALE,
+  POE2_MASTERY_EFFECT_SCALE,
   type Poe2Connection,
   type Poe2EffectNode
 } from './poe2/skill_tree_adapter';
@@ -30,6 +32,11 @@ export let baseJewelRadius = 1800;
 // Display scale applied to sprite source rects in SkillTree.svelte's drawSprite.
 // PoE1 default is 2.6; the PoE2 loader retunes it for PoE2 atlas/spacing.
 export let spriteDrawScale = 2.6;
+
+// Per-node-type multipliers on top of spriteDrawScale (1 = no change). PoE1 leaves
+// them at 1; the PoE2 loader nudges notables smaller and the mastery backdrop bigger.
+export let notableDrawScale = 1;
+export let masteryEffectScale = 1;
 
 // PoE2 skill icons are opaque square images (the art has a square background), so
 // they must be clipped to a circle to read as round nodes (PoE1 icons are
@@ -154,6 +161,8 @@ export const loadSkillTreePoe2 = async (basePath = ''): Promise<void> => {
   replaceRecord(inverseSpritesActive, bundle.inverseSpritesActive);
   baseJewelRadius = POE2_JEWEL_RADIUS;
   spriteDrawScale = POE2_SPRITE_DRAW_SCALE;
+  notableDrawScale = POE2_NOTABLE_DRAW_SCALE;
+  masteryEffectScale = POE2_MASTERY_EFFECT_SCALE;
   clipNodeIcons = true;
   connections = bundle.connections;
   debugNodeInfo = true;
@@ -438,7 +447,10 @@ export interface MassSearchResults {
 export const translateStat = (id: number, roll?: number | undefined): string => {
   const stat = getStat(id);
   const translation = inverseTranslations[stat.ID];
-  if (roll) {
+  // Only format against a real translation. PoE2 synthetic notable stats have no
+  // entry in inverseTranslations, so `translation` is undefined — falling through to
+  // stat.Text (the "<attributes> (<notable>)" label) instead of crashing formatStats.
+  if (roll && translation) {
     return formatStats(translation, roll) || stat.ID;
   }
 

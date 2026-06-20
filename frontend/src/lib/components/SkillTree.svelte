@@ -13,6 +13,8 @@
     inverseTranslations,
     skillTree,
     spriteDrawScale,
+    notableDrawScale,
+    masteryEffectScale,
     clipNodeIcons,
     connections,
     debugNodeInfo,
@@ -64,7 +66,8 @@
     pos: Point,
     active = false,
     mirrored = false,
-    clipCircle = false
+    clipCircle = false,
+    scaleMultiplier = 1
   ) => {
     let sprite = active ? inverseSpritesActive[path] : inverseSprites[path];
 
@@ -87,8 +90,8 @@
 
     const self = sprite.coords[path];
 
-    const newWidth = (self.w / scaling) * drawScaling;
-    const newHeight = (self.h / scaling) * drawScaling;
+    const newWidth = (self.w / scaling) * drawScaling * scaleMultiplier;
+    const newHeight = (self.h / scaling) * drawScaling * scaleMultiplier;
 
     const topLeftX = pos.x - newWidth / 2;
     const topLeftY = pos.y - newHeight / 2;
@@ -243,7 +246,9 @@
             }
           }
         }
-        drawSprite(context, m.activeEffectImage, mp, active);
+        // Masteries' backdrop reads a touch small — nudge only those up; the themed
+        // notable/small backdrops keep their authored size.
+        drawSprite(context, m.activeEffectImage, mp, active, false, false, m.isMastery ? masteryEffectScale : 1);
       });
       context.globalCompositeOperation = prevComposite;
     }
@@ -350,11 +355,12 @@
         }
       } else if (node.isNotable) {
         touchDistance = 70;
-        drawSprite(context, node.icon, rotatedPos, active, false, clipNodeIcons);
+        // Scale the icon and its ring together so the notable reads a touch smaller.
+        drawSprite(context, node.icon, rotatedPos, active, false, clipNodeIcons, notableDrawScale);
         if (active) {
-          drawSprite(context, 'NotableFrameAllocated', rotatedPos, false);
+          drawSprite(context, 'NotableFrameAllocated', rotatedPos, false, false, false, notableDrawScale);
         } else {
-          drawSprite(context, 'NotableFrameUnallocated', rotatedPos, false);
+          drawSprite(context, 'NotableFrameUnallocated', rotatedPos, false, false, false, notableDrawScale);
         }
       } else if (node.isJewelSocket) {
         touchDistance = 70;
