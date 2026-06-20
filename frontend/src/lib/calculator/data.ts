@@ -612,6 +612,12 @@ export { TIMELESS_JEWEL_SEED_RANGES, TIMELESS_JEWEL_CONQUERORS };
 // initializeCrystallinePoe2 fills this from the wiki-baked jewel data instead.
 export const conquerorKeystones: Record<number, Record<string, { name: string; effects: string[] }>> = {};
 
+// Maps a synthetic PoE2 stat id (the UI's "stat" is a result notable) to that
+// notable's wiki id, which is exactly `vocab_notables.id` in the community DB.
+// Populated by initializeCrystallinePoe2; consumed by lib/poe2/search.ts to turn a
+// selected notable into a reverse-search query against the DB.
+export const poe2NotableVocabId: Record<number, string> = {};
+
 /**
  * Initialize the data layer for the PoE2 route: swap the jewel tables to the two
  * PoE2 jewels (from the committed wiki data) and stub the PoE1-only pieces the
@@ -628,12 +634,17 @@ export async function initializeCrystallinePoe2(basePath = ''): Promise<void> {
   const ranges: Record<number, Range> = {};
   const possible: Record<number, Record<string, number>> = {};
 
-  // Build a searchable stat list per jewel from its notable pool's stat lines.
-  // PoE2 has no numeric stat ids, so synthesize ids (>= 900000, no PoE1 overlap)
-  // and register them in idToStat so the shared UI's translateStat() shows the
-  // human text and every search button (gated on a selected stat) is reachable.
+  // Build the searchable list per jewel from its RESULT NOTABLE pool — the unit the
+  // community DB actually records (it stores which notable a node became, with no
+  // per-stat-line granularity). PoE2 has no numeric stat ids, so synthesize ids
+  // (>= 900000, no PoE1 overlap) — one per notable — and register them in idToStat so
+  // the shared UI's translateStat() shows the notable name. poe2NotableVocabId maps
+  // each synthetic id back to the notable's wiki id (== vocab_notables.id in the DB),
+  // so lib/poe2/search.ts can resolve a selection into a reverse-search query.
   let nextStatId = 900000;
-  const statIdByText = new Map<string, number>();
+  for (const k of Object.keys(poe2NotableVocabId)) {
+    delete poe2NotableVocabId[Number(k)];
+  }
 
   for (const j of jewels) {
     tj[j.id] = j.name;
@@ -647,15 +658,14 @@ export async function initializeCrystallinePoe2(basePath = ''): Promise<void> {
 
     const poss: Record<string, number> = {};
     for (const notable of getPoe2Notables(j.id)) {
-      for (const line of notable.stats) {
-        let id = statIdByText.get(line);
-        if (id === undefined) {
-          id = nextStatId++;
-          statIdByText.set(line, id);
-          idToStat[id] = { Index: id, ID: `poe2_stat_${id}`, Text: line };
-        }
-        poss[id] = 1;
-      }
+      const id = nextStatId++;
+      // Show the actual attribute lines (what the notable grants) plus the notable
+      // name — users search by the stat, not the notable's name. translateStat() uses
+      // this Text in both the stat picker and the rendered results.
+      const attrs = notable.stats?.length ? notable.stats.join(', ') : '';
+      idToStat[id] = { Index: id, ID: notable.id, Text: attrs ? `${attrs} (${notable.name})` : notable.name };
+      poe2NotableVocabId[id] = notable.id;
+      poss[id] = 1;
     }
     possible[j.id] = poss;
   }

@@ -251,6 +251,51 @@ async function handlePoe2(
       ORDER BY tn.name
     `;
     response = jsonResponse({ jewel, seed, results: rows }, cors, CONSENSUS_MAX_AGE);
+  } else if (url.pathname === '/api/poe2/search') {
+    // Reverse search: which recorded seeds turn some node into one of the desired
+    // result notables. Conqueror-agnostic (catalog_consensus rolls off seed + node),
+    // so we don't filter by conqueror here. The client filters the returned rows to
+    // its socket's affected nodes and scores/ranks them. Defaults to verified-only
+    // (>= 2 distinct clients); pass verified=0 to include single-client observations.
+    const jewel = url.searchParams.get('jewel');
+    const notablesRaw = url.searchParams.get('notables');
+    if (!jewel || !notablesRaw) {
+      return errorResponse('missing ?jewel and ?notables', 400, cors);
+    }
+    const notables = notablesRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (notables.length === 0) {
+      return errorResponse('no notables given', 400, cors);
+    }
+    const verifiedOnly = url.searchParams.get('verified') !== '0';
+    // Fetch one extra row to detect (and flag) truncation rather than silently capping.
+    const limit = 5000;
+    const rows = verifiedOnly
+      ? await sql`
+          SELECT cc.seed, cc.node_id, cc.result_notable_id, cc.confirmations, cc.verified
+          FROM catalog_consensus cc
+          WHERE cc.jewel_type = ${jewel}
+            AND cc.result_notable_id = ANY(${notables})
+            AND cc.verified
+          ORDER BY cc.confirmations DESC
+          LIMIT ${limit + 1}
+        `
+      : await sql`
+          SELECT cc.seed, cc.node_id, cc.result_notable_id, cc.confirmations, cc.verified
+          FROM catalog_consensus cc
+          WHERE cc.jewel_type = ${jewel}
+            AND cc.result_notable_id = ANY(${notables})
+          ORDER BY cc.confirmations DESC
+          LIMIT ${limit + 1}
+        `;
+    const truncated = rows.length > limit;
+    response = jsonResponse(
+      { jewel, notables, results: truncated ? rows.slice(0, limit) : rows, truncated },
+      cors,
+      CONSENSUS_MAX_AGE
+    );
   } else {
     return errorResponse('not found', 404, cors);
   }
@@ -270,7 +315,8 @@ export default {
       return new Response(null, { status: 204, headers: cors });
     }
 
-    if (url.pathname.startsWith('/api/trade/')) {
+    // Covers both PoE1 (/api/trade/...) and PoE2 (/api/trade2/...) — same origin proxy.
+    if (url.pathname.startsWith('/api/trade')) {
       return handleTrade(request, url, cors);
     }
 

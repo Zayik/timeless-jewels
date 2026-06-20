@@ -2,7 +2,7 @@
 // (cached, no auth). Writes live in submit.ts; this file is read-only.
 
 import { workerBase } from './config';
-import type { Poe2Jewel, Poe2Reference, ConsensusResult } from './types';
+import type { Poe2Jewel, Poe2Reference, ConsensusResult, ReverseSearchResponse } from './types';
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${workerBase()}${path}`);
@@ -35,4 +35,21 @@ export async function getReference(jewelId: string): Promise<Poe2Reference> {
 /** Recorded consensus transforms for a (jewel, seed). Empty when nothing is recorded yet. */
 export async function getConsensus(jewelId: string, seed: number): Promise<ConsensusResult> {
   return getJson<ConsensusResult>(`/api/poe2/consensus?jewel=${encodeURIComponent(jewelId)}&seed=${seed}`);
+}
+
+/**
+ * Reverse search: every recorded seed that turns some node into one of `notableIds`
+ * (the notables' wiki ids = vocab_notables.id). Conqueror-agnostic. Defaults to
+ * verified-only (>= 2 distinct clients); pass verifiedOnly=false to include the rest.
+ */
+export async function reverseSearch(
+  jewelId: string,
+  notableIds: string[],
+  verifiedOnly = true
+): Promise<ReverseSearchResponse> {
+  const params = new URLSearchParams({ jewel: jewelId, notables: notableIds.join(',') });
+  if (!verifiedOnly) {
+    params.set('verified', '0');
+  }
+  return getJson<ReverseSearchResponse>(`/api/poe2/search?${params.toString()}`);
 }

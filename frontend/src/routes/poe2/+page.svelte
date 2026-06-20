@@ -13,13 +13,7 @@
   import type { Node } from '../../lib/skill_tree_types';
   import { getAffectedNodes, skillTree, translateStat } from '../../lib/skill_tree';
   import { openTrade } from '../../lib/trade';
-  import type {
-    ReverseSearchConfig,
-    StatConfig,
-    MassReverseSearchConfig,
-    MassSearchResults,
-    SearchResults as SearchResultsData
-  } from '../../lib/skill_tree';
+  import type { StatConfig, MassSearchResults, SearchResults as SearchResultsData } from '../../lib/skill_tree';
   import type { AlternatePassiveSkillInformation } from '../../lib/calculator/types';
   import ResultsPanel from '../../lib/components/ResultsPanel.svelte';
   import MarketPanel from '../../lib/components/MarketPanel.svelte';
@@ -36,6 +30,13 @@
   } from '../../lib/storageManager';
   import type { MarketJewel } from '$lib/market_cache';
   import { SvelteSet } from 'svelte/reactivity';
+  import { searchSocket, searchAllSockets, searchSeed } from '../../lib/poe2/search';
+  import { workerBase } from '../../lib/poe2/config';
+
+  // The conqueror/variant doesn't affect the (variant-agnostic) DB search — it only
+  // picks which keystone you want and which variant the Trade link filters for. "Any"
+  // (value '') trades across all variants; a specific one narrows it.
+  const ANY_CONQUEROR = { value: '', label: 'Any conqueror' };
 
   const searchParams = $page.url.searchParams;
 
@@ -50,10 +51,13 @@
 
   const conquerors = $derived(
     selectedJewel
-      ? Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).map((k) => ({
-          value: k,
-          label: k
-        }))
+      ? [
+          ANY_CONQUEROR,
+          ...Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).map((k) => ({
+            value: k,
+            label: k
+          }))
+        ]
       : []
   );
 
@@ -63,15 +67,16 @@
           value: searchParams.get('conqueror'),
           label: searchParams.get('conqueror')
         }
-      : undefined
+      : ANY_CONQUEROR
   );
 
-  // Keep a sensible default conqueror/variant selected for the chosen jewel.
+  // Default to "Any conqueror"; only fall back to it if the current pick isn't valid
+  // for the chosen jewel (e.g. after switching jewels).
   $effect(() => {
     if (selectedJewel && conquerors.length > 0) {
       const valid = conquerors.some((c) => c.value === selectedConqueror?.value);
       if (!valid) {
-        selectedConqueror = conquerors[0];
+        selectedConqueror = ANY_CONQUEROR;
       }
     }
   });
@@ -113,7 +118,8 @@
   const updateUrl = () => {
     const url = new URL(window.location.origin + window.location.pathname);
     selectedJewel && url.searchParams.append('jewel', selectedJewel.value.toString());
-    selectedConqueror && url.searchParams.append('conqueror', selectedConqueror.value);
+    // 'Any' (value '') isn't worth persisting — leaving it out keeps Any the default.
+    selectedConqueror && selectedConqueror.value && url.searchParams.append('conqueror', selectedConqueror.value);
     seed && url.searchParams.append('seed', seed.toString());
     circledNode && url.searchParams.append('location', circledNode.toString());
     mode && url.searchParams.append('mode', mode);
@@ -232,44 +238,49 @@
     return map;
   };
 
-  const search = () => {
+  // The DB jewel_type is the jewel's name; selectedJewel.label already holds it.
+  const affectedSkills = (): number[] => affectedNodes.filter((n) => !disabled.has(n.skill)).map((n) => n.skill);
+
+  const search = async () => {
     if (!circledNode || !selectedJewel || !selectedConqueror) {
       return;
     }
     searchJewel = selectedJewel.value;
     searchConqueror = selectedConqueror.value;
-
-    const query: ReverseSearchConfig = {
-      jewel: selectedJewel.value,
-      conqueror: selectedConqueror.value,
-      nodes: affectedNodes
-        .filter((n) => !disabled.has(n.skill))
-        .map((n) => data.TreeToPassive[n.skill])
-        .filter((n) => !!n)
-        .map((n) => n.Index),
-      stats: Object.keys(selectedStats).map((stat) => ({ ...selectedStats[parseInt(stat)] })),
-      minTotalWeight
-    };
-
-    todoSearch('search (this socket)', query);
+    searching = true;
+    try {
+      searchResults = await searchSocket(
+        selectedJewel.label,
+        Object.values(selectedStats),
+        affectedSkills(),
+        minTotalWeight
+      );
+      massSearchResults = undefined;
+      results = true;
+    } finally {
+      searching = false;
+    }
   };
 
-  const massSearch = () => {
+  const massSearch = async () => {
     if (!selectedJewel || !selectedConqueror) {
       return;
     }
     searchJewel = selectedJewel.value;
     searchConqueror = selectedConqueror.value;
-
-    const query: MassReverseSearchConfig = {
-      jewel: selectedJewel.value,
-      conqueror: selectedConqueror.value,
-      socketToNodes: buildSocketToNodes(),
-      stats: Object.keys(selectedStats).map((stat) => ({ ...selectedStats[parseInt(stat)] })),
-      minTotalWeight
-    };
-
-    todoSearch('massSearch (all sockets)', query);
+    searching = true;
+    try {
+      massSearchResults = await searchAllSockets(
+        selectedJewel.label,
+        Object.values(selectedStats),
+        buildSocketToNodes(),
+        minTotalWeight
+      );
+      searchResults = undefined;
+      results = true;
+    } finally {
+      searching = false;
+    }
   };
 
   let highlighted = $state<number[]>([]);
@@ -367,23 +378,15 @@
   let leagues = $state<{ value: string; label: string }[]>([]);
   let league = $state<{ value: string; label: string } | undefined>(undefined);
   const getLeagues = async () => {
-    const response = await fetch('https://api.poe.watch/leagues');
-    const responseJson = await response.json();
+    // PoE2 leagues (realm 'poe2'), via the trade2 API through the Worker proxy — the
+    // PoE1 poe.watch list would produce invalid /trade2 URLs.
+    const response = await fetch(`${workerBase()}/api/trade2/data/leagues`);
+    const responseJson = (await response.json()) as { result: { id: string; text: string }[] };
 
-    const sortedLeagues = (responseJson as { start_date: string; name: string }[]).sort(
-      (a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
-    );
-
-    leagues = sortedLeagues.map((l) => ({ value: l.name, label: l.name }));
+    leagues = responseJson.result.map((l) => ({ value: l.id, label: l.text }));
 
     const defaultLeague =
-      leagues.find(
-        (l) =>
-          !l.value.includes('Ruthless') &&
-          !l.value.includes('Self-Found') &&
-          !l.value.includes('Hardcore') &&
-          !l.value.includes('Standard')
-      ) ||
+      leagues.find((l) => !/Standard|Hardcore|^HC /.test(l.value)) ||
       leagues.find((l) => l.value === 'Standard') ||
       leagues[0];
 
@@ -439,56 +442,70 @@
     });
   };
 
-  const marketSearchAllSockets = () => {
+  const marketSearchAllSockets = async () => {
     if (!selectedJewel) {
       return;
     }
     searchJewel = selectedJewel.value;
-    todoSearch('marketSearchAllSockets', {
-      jewel: selectedJewel.value,
-      seeds: filteredMarketJewels.map((j) => j.seed),
-      socketToNodes: buildSocketToNodes(),
-      stats: Object.values(selectedStats),
-      minTotalWeight
-    });
+    if (selectedConqueror) {
+      searchConqueror = selectedConqueror.value;
+    }
+    searching = true;
+    try {
+      massSearchResults = await searchAllSockets(
+        selectedJewel.label,
+        Object.values(selectedStats),
+        buildSocketToNodes(),
+        minTotalWeight,
+        filteredMarketJewels.map((j) => j.seed)
+      );
+      searchResults = undefined;
+      results = true;
+    } finally {
+      searching = false;
+    }
   };
 
-  const marketSearchCurrentSocket = () => {
+  const marketSearchCurrentSocket = async () => {
     if (!selectedJewel || !circledNode) {
       return;
     }
     searchJewel = selectedJewel.value;
-    todoSearch('marketSearchCurrentSocket', {
-      jewel: selectedJewel.value,
-      seeds: filteredMarketJewels.map((j) => j.seed),
-      socketToNodes: {
-        [circledNode]: affectedNodes
-          .filter((n) => !disabled.has(n.skill))
-          .map((n) => data.TreeToPassive[n.skill])
-          .filter(Boolean)
-          .map((n) => n.Index)
-      },
-      stats: Object.values(selectedStats),
-      minTotalWeight
-    });
+    if (selectedConqueror) {
+      searchConqueror = selectedConqueror.value;
+    }
+    searching = true;
+    try {
+      searchResults = await searchSocket(
+        selectedJewel.label,
+        Object.values(selectedStats),
+        affectedSkills(),
+        minTotalWeight,
+        filteredMarketJewels.map((j) => j.seed)
+      );
+      massSearchResults = undefined;
+      results = true;
+    } finally {
+      searching = false;
+    }
   };
 
   let seedSearchInput = $state<number>(0);
 
-  const searchBySeed = () => {
+  const searchBySeed = async () => {
     if (!selectedJewel || !selectedConqueror || !seedSearchInput) {
       return;
     }
     searchJewel = selectedJewel.value;
     searchConqueror = selectedConqueror.value;
-    todoSearch('searchBySeed', {
-      jewel: selectedJewel.value,
-      conqueror: selectedConqueror.value,
-      seed: seedSearchInput,
-      socketToNodes: buildSocketToNodes(),
-      stats: Object.values(selectedStats),
-      minTotalWeight
-    });
+    searching = true;
+    try {
+      searchResults = await searchSeed(selectedJewel.label, seedSearchInput);
+      massSearchResults = undefined;
+      results = true;
+    } finally {
+      searching = false;
+    }
   };
 </script>
 

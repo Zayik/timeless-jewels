@@ -50,6 +50,27 @@ export interface ConsensusResult {
   results: ConsensusRow[];
 }
 
+/**
+ * One row from the reverse search: a recorded `(seed, node)` that became one of the
+ * requested result notables. Conqueror-agnostic. `node_id` is the tree node's string
+ * id (e.g. "Sprint10"); `result_notable_id` is the notable's wiki id (vocab_notables.id).
+ */
+export interface ReverseSearchRow {
+  seed: number;
+  node_id: string;
+  result_notable_id: string;
+  confirmations: number;
+  verified: boolean;
+}
+
+/** Response of `/api/poe2/search`. `truncated` is true when the row cap was hit. */
+export interface ReverseSearchResponse {
+  jewel: string;
+  notables: string[];
+  results: ReverseSearchRow[];
+  truncated: boolean;
+}
+
 /** A single observation a contributor submits (one vote). */
 export interface ObservationInput {
   jewel_type: string;
