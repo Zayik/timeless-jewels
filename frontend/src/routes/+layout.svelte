@@ -6,12 +6,19 @@
   import { loadSkillTree, loadSkillTreePoe2 } from '../lib/skill_tree';
   import { syncWrap } from '../lib/worker';
   import { initializeCrystalline, initializeCrystallinePoe2 } from '../lib/types';
+  import { setTradeGame } from '../lib/trade';
 
   const { children } = $props();
 
   // PoE1 and PoE2 are separate apps sharing UI. They populate the same data /
   // skill-tree singletons but from different sources, so only one boots per route.
   const isPoe2 = $derived($page.url.pathname.startsWith(`${base}/poe2`));
+
+  // Keep the trade builder pointed at the right game's stat map + site, even across
+  // client-side navigation between the PoE1 and PoE2 routes.
+  $effect(() => {
+    setTradeGame(isPoe2 ? 'poe2' : 'poe1');
+  });
 
   let poe1Loading = $state(true);
   let poe1Booted = false;

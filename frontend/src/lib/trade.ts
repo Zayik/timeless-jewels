@@ -40,6 +40,33 @@ export const tradeStatNames: { [key: number]: { [key: string]: string } } = {
   }
 };
 
+// PoE2 timeless jewels filter on an explicit per-variant seed stat (the seed is the
+// stat's value), sourced from the PoE2 trade API (/api/trade2/data/stats). Keyed by
+// the PoE2 jewel id (1 = Heroic Tragedy, 2 = Undying Hate). These ids are PoE2's own
+// and collide with PoE1's, so they live in a separate, game-selected map.
+export const poe2TradeStatNames: { [key: number]: { [key: string]: string } } = {
+  1: {
+    Vorana: 'explicit.stat_3418580811|21',
+    Medved: 'explicit.stat_3418580811|22',
+    Olroth: 'explicit.stat_3418580811|23'
+  },
+  2: {
+    Amanamu: 'explicit.stat_3418580811|24',
+    Kulemak: 'explicit.stat_3418580811|25',
+    Kurgal: 'explicit.stat_3418580811|26',
+    Tecrod: 'explicit.stat_3418580811|27',
+    Ulaman: 'explicit.stat_3418580811|28'
+  }
+};
+
+// Trade is game-aware: the PoE2 route sets this so the query + site target PoE2.
+let activeTradeGame: 'poe1' | 'poe2' = 'poe1';
+export const setTradeGame = (game: 'poe1' | 'poe2'): void => {
+  activeTradeGame = game;
+};
+const activeStatNames = (): { [key: number]: { [key: string]: string } } =>
+  activeTradeGame === 'poe2' ? poe2TradeStatNames : tradeStatNames;
+
 const platformRealms: { [key: string]: string } = {
   PC: '',
   Xbox: 'xbox',
@@ -59,11 +86,15 @@ export const constructQuery = <T extends SeedRef>(
   if (result.length === 0) {
     throw new Error('constructQuery: result must not be empty');
   }
-  const conquerors = Object.keys(tradeStatNames[jewel] ?? {});
+  const statNames = activeStatNames();
+  const conquerors = Object.keys(statNames[jewel] ?? {});
   if (conquerors.length === 0) {
     throw new Error(`constructQuery: unknown jewel type ${jewel}`);
   }
-  if (!conquerors.includes(conqueror)) {
+  // An empty / 'Any' conqueror means "any variant". The PoE2 seed->notable transform
+  // is variant-agnostic, so a matching seed exists on every variant; we OR them.
+  const anyConqueror = conqueror === '' || conqueror === 'Any';
+  if (!anyConqueror && !conquerors.includes(conqueror)) {
     throw new Error(`constructQuery: unknown conqueror "${conqueror}" for jewel ${jewel}`);
   }
 
@@ -80,13 +111,27 @@ export const constructQuery = <T extends SeedRef>(
   }
   const final_query: TradeStatGroup[] = [];
 
-  if (result.length === 1) {
+  if (anyConqueror) {
+    // One count>=1 group OR-ing every (variant, seed) filter, so a jewel matches if
+    // it is ANY variant carrying one of the seeds. Capped to the trade filter limit,
+    // keeping each included seed fully covered across variants.
+    const filters: TradeFilter[] = [];
+    for (const r of result) {
+      if (filters.length + conquerors.length > max_filter_length) {
+        break;
+      }
+      for (const conq of conquerors) {
+        filters.push({ id: statNames[jewel][conq], value: { min: r.seed, max: r.seed } });
+      }
+    }
+    final_query.push({ type: 'count', value: { min: 1 }, filters, disabled: false });
+  } else if (result.length === 1) {
     final_query.push({
       type: 'count',
       value: { min: 1 },
       disabled: false,
       filters: conquerors.map((conq) => ({
-        id: tradeStatNames[jewel][conq],
+        id: statNames[jewel][conq],
         value: { min: result[0].seed, max: result[0].seed },
         disabled: conq != conqueror
       }))
@@ -100,7 +145,7 @@ export const constructQuery = <T extends SeedRef>(
         type: 'count',
         value: { min: 1 },
         filters: result.map((r) => ({
-          id: tradeStatNames[jewel][conq],
+          id: statNames[jewel][conq],
           value: { min: r.seed, max: r.seed }
         })),
         disabled: conq != conqueror
@@ -110,7 +155,7 @@ export const constructQuery = <T extends SeedRef>(
     // Selected-conqueror deep-dive: too many matches to compare against
     // other conquerors meaningfully, so chunk the selected conqueror's seeds
     // across all 4 stat groups. First group enabled, rest toggleable.
-    const selectedId = tradeStatNames[jewel][conqueror];
+    const selectedId = statNames[jewel][conqueror];
     for (let i = 0; i < max_filters; i++) {
       final_query.push({
         type: 'count',
@@ -144,6 +189,12 @@ export const tradeUrl = (platform: string, league: string): string => {
 
   if (!league || typeof league !== 'string') {
     league = 'Standard';
+  }
+
+  if (activeTradeGame === 'poe2') {
+    // PoE2 trade site — the realm segment is always 'poe2' (console PoE2 trade is not
+    // distinguished here yet, so platform is ignored for PoE2).
+    return `https://www.pathofexile.com/trade2/search/poe2/${encodeURIComponent(league)}`;
   }
 
   const realm = platformRealms[platform] ?? platform.toLowerCase();

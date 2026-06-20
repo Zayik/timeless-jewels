@@ -112,9 +112,13 @@
     setSplit(split);
   });
 
+  // The empty-string value is the PoE2 "Any conqueror" option — a valid selection
+  // (search is variant-agnostic). PoE1 always has a concrete conqueror, so it's
+  // unaffected. Anything else must be a real variant of the selected jewel.
   const validConqueror = $derived(
-    selectedConqueror &&
-      Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).indexOf(selectedConqueror.value) >= 0
+    !!selectedConqueror &&
+      (selectedConqueror.value === '' ||
+        Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).indexOf(selectedConqueror.value) >= 0)
   );
 
   // Color keys and helpers
