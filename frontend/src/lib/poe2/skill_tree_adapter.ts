@@ -81,6 +81,22 @@ export const POE2_SPRITE_DRAW_SCALE = 2.3;
 // the mastery effect backdrop respectively in SkillTree.svelte.
 export const POE2_NOTABLE_DRAW_SCALE = 0.9;
 export const POE2_MASTERY_EFFECT_SCALE = 1.15;
+// Empty jewel-socket frame art (static/data/Jewel/JewelSocket_*.png — the beveled ring
+// with 8 studs, hollow centre). Drawn for ALL jewel sockets in place of the generic 76px
+// JewelFrame. Multiplier on top of the global draw scale, applied to the jewel-socket
+// frame sprite in pixi_tree.ts. Sized so the socket renders ~the same diameter as a
+// notable: the PNG's opaque content is ~139px vs the notable frame's 76px (×0.9 notable
+// scale), so 139·s ≈ 76·0.9 → s ≈ 0.49. 1 = no change.
+export const POE2_SOCKET_DRAW_SCALE = 0.49;
+// Sprite keys for the empty-socket frames, mapped to their PNG file. The selected
+// (allocated) socket uses the gold variant; every other socket uses the dim one.
+export const POE2_SOCKET_FRAME_UNALLOCATED = 'JewelSocket_Unallocated';
+export const POE2_SOCKET_FRAME_ALLOCATED = 'JewelSocket_Allocated';
+const POE2_SOCKET_FRAME_FILES: Record<string, string> = {
+  [POE2_SOCKET_FRAME_UNALLOCATED]: 'JewelSocket_Unallocated.png',
+  [POE2_SOCKET_FRAME_ALLOCATED]: 'JewelSocket_Allocated.png'
+};
+const POE2_SOCKET_FRAME_SIZE = { w: 152, h: 156 };
 // PoE2 timeless jewels have a very large radius; tuned to cover a socket's cluster.
 export const POE2_JEWEL_RADIUS = 2800;
 
@@ -178,6 +194,12 @@ export async function buildPoe2Tree(basePath = ''): Promise<Poe2TreeBundle> {
   // drawSprite(path, active) picks the right one.
   indexAtlas(masteryActive, `${assets}/mastery-effect-active.webp`, afterColon, inverseSpritesActive);
   indexAtlas(masteryDisabled, `${assets}/mastery-effect-disabled.webp`, afterColon, inverseSprites);
+  // Empty jewel-socket frames: each is a standalone PNG (no atlas), registered as a
+  // single full-image "frame" so drawSprite/getTexture treat it like any other sprite.
+  // Both go in the inactive map; the renderer picks allocated vs unallocated by socket.
+  for (const [key, file] of Object.entries(POE2_SOCKET_FRAME_FILES)) {
+    inverseSprites[key] = { filename: `${basePath}/data/Jewel/${file}`, coords: { [key]: { x: 0, y: 0, ...POE2_SOCKET_FRAME_SIZE } } };
+  }
 
   // Constants: node positions come from absolute x/y so these only affect the
   // same-group/same-orbit connection arcs and orbit angle math. Provide generous

@@ -8,6 +8,7 @@ import {
   POE2_SPRITE_DRAW_SCALE,
   POE2_NOTABLE_DRAW_SCALE,
   POE2_MASTERY_EFFECT_SCALE,
+  POE2_SOCKET_DRAW_SCALE,
   type Poe2Connection,
   type Poe2EffectNode
 } from './poe2/skill_tree_adapter';
@@ -50,6 +51,10 @@ export let spriteDrawScale = 2.6;
 // them at 1; the PoE2 loader nudges notables smaller and the mastery backdrop bigger.
 export let notableDrawScale = 1;
 export let masteryEffectScale = 1;
+
+// Multiplier for the jewel-socket frame sprite (PoE2 only; PoE1 keeps the generic frame
+// at 1). Sizes the 152px empty-socket PNGs to ~poeplanner scale.
+export let socketDrawScale = 1;
 
 // PoE2 skill icons are opaque square images (the art has a square background), so
 // they must be clipped to a circle to read as round nodes (PoE1 icons are
@@ -225,6 +230,7 @@ export const loadSkillTreePoe2 = async (basePath = ''): Promise<void> => {
   spriteDrawScale = POE2_SPRITE_DRAW_SCALE;
   notableDrawScale = POE2_NOTABLE_DRAW_SCALE;
   masteryEffectScale = POE2_MASTERY_EFFECT_SCALE;
+  socketDrawScale = POE2_SOCKET_DRAW_SCALE;
   clipNodeIcons = true;
   connections = bundle.connections;
   debugNodeInfo = true;

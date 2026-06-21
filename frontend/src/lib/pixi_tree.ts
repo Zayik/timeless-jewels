@@ -35,9 +35,11 @@ import {
   masteryEffectScale,
   notableDrawScale,
   skillTree,
+  socketDrawScale,
   spriteDrawScale,
   type Point
 } from './skill_tree';
+import { POE2_SOCKET_FRAME_ALLOCATED, POE2_SOCKET_FRAME_UNALLOCATED } from './poe2/skill_tree_adapter';
 import type { Node } from './skill_tree_types';
 
 const BG_COLOR = 0x080c11;
@@ -129,7 +131,11 @@ export class PixiTree {
   private readonly drawScale = spriteDrawScale;
   private readonly notableScale = notableDrawScale;
   private readonly masteryScale = masteryEffectScale;
+  private readonly socketScale = socketDrawScale;
   private readonly clip = clipNodeIcons;
+  // True when the PoE2 empty-socket frames are loaded (so jewel sockets use them instead
+  // of PoE1's generic frame).
+  private readonly hasSocketFrames = !!inverseSprites[POE2_SOCKET_FRAME_UNALLOCATED];
   private readonly absX = Math.abs(skillTree.min_x);
   private readonly absY = Math.abs(skillTree.min_y);
 
@@ -399,6 +405,11 @@ export class PixiTree {
 
   private framePath(node: Node, active: boolean): string {
     if (node.isJewelSocket) {
+      // PoE2: the empty-socket frame — gold when this socket is the selected one.
+      if (this.hasSocketFrames) {
+        return active ? POE2_SOCKET_FRAME_ALLOCATED : POE2_SOCKET_FRAME_UNALLOCATED;
+      }
+      // PoE1 fallback: generic jewel frame.
       return node.expansionJewel ? 'JewelSocketAltNormal' : active ? 'JewelFrameAllocated' : 'JewelFrameUnallocated';
     }
     if (node.isKeystone) {
@@ -410,13 +421,24 @@ export class PixiTree {
     return active ? 'PSSkillFrameActive' : 'PSSkillFrame';
   }
 
+  // Scale multiplier for a node's frame sprite. Notables and the PoE2 empty-socket frame
+  // each have their own tuning; everything else draws at the global scale.
+  private frameMult(node: Node): number {
+    if (node.isNotable) {
+      return this.notableScale;
+    }
+    if (node.isJewelSocket && this.hasSocketFrames) {
+      return this.socketScale;
+    }
+    return 1;
+  }
+
   private addFrame(layer: Container, node: Node, base: Point, active: boolean): Sprite | undefined {
     const tex = this.getTexture(this.framePath(node, active), false);
     if (!tex) {
       return undefined;
     }
-    const mult = node.isNotable ? this.notableScale : 1;
-    const s = this.makeSprite(tex, base, mult);
+    const s = this.makeSprite(tex, base, this.frameMult(node));
     layer.addChild(s);
     return s;
   }
@@ -433,7 +455,9 @@ export class PixiTree {
         }
       }
     }
-    if (nv.frame && !node.isJewelSocket) {
+    // Swap the frame for everything except PoE1 jewel sockets (those keep a static
+    // frame). PoE2 sockets DO swap — the selected socket turns gold.
+    if (nv.frame && (!node.isJewelSocket || this.hasSocketFrames)) {
       const tex = this.getTexture(this.framePath(node, active), false);
       if (tex) {
         nv.frame.texture = tex;
@@ -450,7 +474,11 @@ export class PixiTree {
 
     for (const nv of this.nodeVisuals) {
       let active = false;
-      if (centre) {
+      if (nv.node.isJewelSocket) {
+        // A socket is "active" only when it is the selected socket (→ gold frame), not
+        // by the radius test (which would also light nearby sockets in the centre cluster).
+        active = this.circledNode !== undefined && nv.node.skill === this.circledNode;
+      } else if (centre) {
         active = Math.hypot(nv.base.x - centre.x, nv.base.y - centre.y) < baseJewelRadius;
       }
       if (disabled.has(nv.node.skill as number)) {
