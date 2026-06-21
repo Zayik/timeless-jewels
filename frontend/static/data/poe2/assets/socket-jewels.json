@@ -1,0 +1,28 @@
+{
+ "frames": {
+  "socket:JewelSocketHeroicTragedy": {
+   "frame": {
+    "x": 0,
+    "y": 0,
+    "w": 152,
+    "h": 156
+   }
+  },
+  "socket:JewelSocketUndyingHate": {
+   "frame": {
+    "x": 152,
+    "y": 0,
+    "w": 152,
+    "h": 156
+   }
+  }
+ },
+ "meta": {
+  "image": "socket-jewels.webp",
+  "scale": "1",
+  "size": {
+   "w": 304,
+   "h": 156
+  }
+ }
+}

@@ -196,3 +196,11 @@ $RECYCLE.BIN/
 
 # Node
 node_modules/
+
+# Build outputs (SvelteKit / Tauri are also covered by frontend/ and overlay/ .gitignore)
+build/
+dist/
+.svelte-kit/
+
+# Dev/debug screen captures (large binaries, not source)
+/Screenshots/
