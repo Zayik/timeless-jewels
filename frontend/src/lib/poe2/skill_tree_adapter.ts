@@ -97,8 +97,13 @@ const POE2_SOCKET_FRAME_FILES: Record<string, string> = {
   [POE2_SOCKET_FRAME_ALLOCATED]: 'JewelSocket_Allocated.png'
 };
 const POE2_SOCKET_FRAME_SIZE = { w: 152, h: 156 };
-// PoE2 timeless jewels have a very large radius; tuned to cover a socket's cluster.
-export const POE2_JEWEL_RADIUS = 2800;
+// PoE2 timeless jewel radius, in tree-coordinate units. This is the authoritative
+// "Very Large" radius: base 1500 × the 1.2 PassiveTreeJewelDistanceMultiplier = 1800,
+// per PoB-PoE2 (src/Modules/Data.lua + src/Data/Misc.lua), in the same units as GGG's
+// node x/y. Matches the in-game ring calibration (Heroic Tragedy measured ~1798). The
+// earlier 1765 estimate was slightly too small and dropped rim notables (e.g. Expendable
+// Army @1775, Well of Power @1787); the prior 2800 guess over-included ~3x.
+export const POE2_JEWEL_RADIUS = 1800;
 
 const fetchJson = async <T>(url: string): Promise<T> => {
   const res = await fetch(url);
