@@ -1,0 +1,7 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+# Dev logs and Python bytecode caches
+*.log
+__pycache__/
