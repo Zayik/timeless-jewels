@@ -1,10 +1,12 @@
-// PoE2 jewel-capture overlay — auto-detecting, always click-through.
+// PoE2 jewel-capture overlay — on-demand calibration, always click-through.
 //
-// The overlay window never intercepts input (it can't lock the screen or steal
-// focus). It captures the screen, auto-detects the jewel (by ring colour) and the
-// socket (by constellation match), then highlights each affected notable in place
-// over the game and walks you through them. All control is via global hotkeys:
-//   Ctrl+Shift+K = start/stop · Ctrl+Shift+J = record current node + advance
+// The overlay window never intercepts input (it can't lock the screen or steal focus).
+// Detection (screen capture + socketed-graphic template match + tree-snap) runs ONLY when you
+// calibrate — Ctrl+Shift+K to start, Ctrl+Shift+R to recalibrate — locking a fixed screen pose.
+// Highlights are drawn from that pose and persist while you pan/zoom or a tooltip covers the
+// jewel; when they drift off the nodes you recalibrate. This is cheap (no per-frame capture)
+// and robust (occlusion/zoom can't break a held pose). All control is via global hotkeys:
+//   Ctrl+Shift+K = show/hide · Ctrl+Shift+R = recalibrate · Ctrl+Shift+J = record node + advance
 // Tooltip OCR (what each node BECAME) is the next milestone; advancing records
 // "visited" for now, proving the geometry locks onto the right nodes.
 
@@ -41,30 +43,30 @@ interface Detection {
   frame_w: number;
   frame_h: number;
   jewel: string;
-  /** Gem template-match correlation (−1..1); how confidently the centre/jewel was found. */
+  /** Socketed-graphic template-match correlation (−1..1); how confidently the pose was found. */
   jewel_match: number;
-  /** Matched socketed-jewel sprite width in px — the stable scale reference. */
+  /** Matched studded-frame width in px — the stable scale ruler (r is derived from it). */
   gem: number;
   socket_id: number;
   socket_score: number;
   socket_second: number;
 }
 
-// Minimum gem-match correlation to trust a frame. Below this the socketed gem isn't at
-// the detected centre (a false-positive ring, or lost lock mid-pan), so the frame is
-// dropped and the last good pose held — this kills the "snaps way off then back" cycle.
+// Minimum match correlation to trust a frame. Below this the socketed graphic isn't at the
+// detected centre (lost lock mid-pan, or nothing matched), so the frame is dropped and the
+// last good pose held — this kills the "snaps way off then back" cycle.
 const MATCH_FLOOR = 0.3;
 
 // --- DOM ---
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <div id="panel">
-    <h1>PoE2 Jewel Overlay <span class="tag">auto</span></h1>
+    <h1>PoE2 Jewel Overlay <span class="tag">calibrate</span></h1>
     <div id="detect" class="muted">Stopped. Press <b>Ctrl+Shift+K</b> to start.</div>
     <div id="jewel" class="muted">No jewel yet. Copy it in-game (<b>Ctrl+C</b>) — auto-detected.</div>
     <div id="status" class="muted"></div>
     <div id="progress" class="muted"></div>
-    <div id="hint" class="muted"><b>Ctrl+Shift+K</b> start/stop · <b>Ctrl+Shift+J</b> record &amp; next · <b>Ctrl+Shift+C</b> read jewel</div>
+    <div id="hint" class="muted"><b>Ctrl+Shift+K</b> show/hide · <b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+J</b> record &amp; next · <b>Ctrl+Shift+C</b> read jewel</div>
   </div>
   <svg id="layer"></svg>
 `;
@@ -75,31 +77,23 @@ const progressEl = document.getElementById('progress')!;
 const layer = document.getElementById('layer') as unknown as SVGSVGElement;
 
 // --- state ---
-let running = false;
-let pollTimer: number | undefined;
+// On-demand calibration model: detection (the expensive screen-capture + template match) runs
+// ONLY when the user calibrates (Ctrl+Shift+K to start, Ctrl+Shift+R to recalibrate). It locks
+// a fixed screen pose; highlights are drawn from that pose and persist while you pan/zoom or a
+// tooltip covers the jewel. When the view has moved enough that highlights drift off the nodes,
+// you recalibrate. A cheap cursor-only poll (no capture) keeps the hover indicator live.
+let active = false; // overlay shown (between Ctrl+Shift+K on/off)
+let hoverTimer: number | undefined;
+let rendering = false; // re-entrancy guard for the cursor-poll render
 let socketIdx = 0; // index into socketList (current socket being projected)
-let manualOverride = false; // true once the user cycles; stops auto from overriding
-let locked = false; // true once auto-detect commits a socket; stops re-identifying
-let ringSmooth: { cx: number; cy: number; r: number } | null = null; // last smoothed pose
-let centerWin: { cx: number; cy: number }[] = []; // recent centres for a small median
-// Gem width (px) ÷ tree-radius ratio. The gem's TREE size is constant, so this is fixed;
-// once calibrated (from one settled frame's ring) it converts the measured gem width into
-// the projection's equivalent ring radius.
-let gemTreeWidth: number | null = null;
-// HELD projection scale (equivalent ring radius). Scale only changes when you ZOOM — never
-// while panning or standing still — so we hold it and re-adopt only on a large, sustained
-// change. This is what kills scale jitter: per-frame scale noise (ring fit OR gem argmax)
-// is absorbed by the hold, and a deadband on scale is safe (panning doesn't change scale).
-let heldScale = 0;
-let scaleBreaches = 0; // consecutive frames the raw scale broke the deadband (zoom confirm)
-const SCALE_DEADBAND = 0.06; // ignore raw-scale changes under 6% (noise); larger = a zoom
-let stableFrames = 0; // consecutive frames the raw ring has barely moved
-let lastIdentifyMs = 0; // throttle the heavy socket-identification pass
-let prevStabRing: { cx: number; cy: number; r: number } | null = null;
-// Last good ring, held briefly when detection fails (e.g. a tooltip overlaps the ring).
-let lastRing: { cx: number; cy: number; r: number; frame_w: number; frame_h: number } | null = null;
-let lastRingMs = 0;
-const RING_HOLD_MS = 2000;
+let manualOverride = false; // true once the user cycles (drives the [manual] label)
+// Once a socket is committed (auto-identified on the first calibrate, or manually cycled) it is
+// LOCKED: later recalibrations refresh only the pose for THIS socket and never re-identify.
+// Socket-ID is unreliable when zoomed far out (tiny frame → noisy scale → central sockets'
+// constellations look alike), so re-picking on every recalibrate would jump to a wrong socket.
+let socketChosen = false;
+// The locked screen pose from the last successful calibration (physical px + effective radius).
+let lockedPose: { cx: number; cy: number; r: number } | null = null;
 // On-screen notable highlight radius as a fraction of the ring radius (both scale
 // with zoom). Tune to taste — larger = the ring hugs further outside the notable.
 const NODE_RADIUS_FRAC = 0.045;
@@ -118,11 +112,11 @@ function setText(el: Element, msg: string, kind: 'ok' | 'warn' | 'muted' = 'mute
   el.className = kind === 'muted' ? 'muted' : kind;
 }
 function updateProgress() {
-  if (running) {
+  if (active && lockedPose) {
     const s = socket();
     progressEl.textContent =
       `Socket ${socketIdx + 1}/${socketList.length} (${s.id} · ${posLabel(s)})` +
-      `${manualOverride ? ' [manual]' : locked ? ' [locked]' : ' [auto]'} · target ${Math.min(targetIdx + 1, s.notables.length)}/${s.notables.length} · recorded ${visited.size}` +
+      `${manualOverride ? ' [manual]' : ''} · target ${Math.min(targetIdx + 1, s.notables.length)}/${s.notables.length} · recorded ${visited.size}` +
       ` · Ctrl+Shift+[ ] to change`;
   } else {
     progressEl.textContent = '';
@@ -177,63 +171,18 @@ function draw(
   }
 }
 
-function resetRingFilters(): void {
-  centerWin = [];
-  ringSmooth = null;
-  heldScale = 0;
-  scaleBreaches = 0;
-}
-// HOLD the scale: keep the held value unless the raw scale breaks the deadband for a couple
-// of frames (a real zoom). Standing still / panning -> raw stays within the band -> the held
-// value never changes -> zero scale jitter. A single noisy spike can't snap it (persistence).
-function holdScale(raw: number): number {
-  if (heldScale === 0) {
-    heldScale = raw;
-    return heldScale;
-  }
-  if (Math.abs(raw - heldScale) / heldScale > SCALE_DEADBAND) {
-    if (++scaleBreaches >= 2) {
-      heldScale = raw; // confirmed zoom: adopt the new scale
-      scaleBreaches = 0;
-    }
-  } else {
-    scaleBreaches = 0;
-  }
-  return heldScale;
-}
-// Median the centre over recent frames. The centre is gem-anchored (a static feature) so
-// it's already steady; the median just kills the odd outlier. It must NOT be deadbanded —
-// the centre follows panning, and a deadband there would freeze slow pans.
-function stabilizeCenter(cx: number, cy: number): { cx: number; cy: number } {
-  if (ringSmooth && Math.hypot(cx - ringSmooth.cx, cy - ringSmooth.cy) > 120) {
-    centerWin = []; // big jump (socket swap / fast move): re-acquire instantly
-  }
-  centerWin.push({ cx, cy });
-  if (centerWin.length > 3) centerWin.shift();
-  const med = (key: 'cx' | 'cy'): number => {
-    const v = centerWin.map((p) => p[key]).sort((a, b) => a - b);
-    return v[v.length >> 1];
-  };
-  const c = { cx: med('cx'), cy: med('cy') };
-  ringSmooth = { cx: c.cx, cy: c.cy, r: heldScale };
-  return c;
-}
-
-// Project the current socket's notables off a given ring pose and draw them. Shared
-// by the live path and the "held ring" path (tooltip occlusion) so both render
-// identically. Only cx/cy/r are read from `ring`.
-async function renderProjection(ring: Detection): Promise<void> {
+// Render the locked pose's notables (optionally with a cursor hover indicator). Cheap and
+// pure: reads only the held pose + the chosen socket, no screen capture.
+function renderLocked(cursorPhysical?: { x: number; y: number }): void {
+  if (!lockedPose) return;
   const dpr = window.devicePixelRatio || 1;
+  const ring = { ...lockedPose, support: 0, frame_w: 0, frame_h: 0 };
   const projected = projectNotables(ring, socket(), data.rTree, dpr);
-  let hover: ProjectedNode | null = null;
-  try {
-    const cur = (await invoke('get_cursor')) as { x: number; y: number };
-    hover = nearestNode(projected, cur, dpr, (ring.r / dpr) * 0.14);
-  } catch {
-    /* cursor unavailable */
-  }
-  updateProgress();
+  const hover = cursorPhysical
+    ? nearestNode(projected, cursorPhysical, dpr, (lockedPose.r / dpr) * 0.14)
+    : null;
   draw(projected, ringInCss(ring, dpr), hover);
+  updateProgress();
 }
 
 function selectSocket(idx: number) {
@@ -242,132 +191,84 @@ function selectSocket(idx: number) {
   visited.clear();
 }
 
-// --- capture loop ---
-// One iteration of capture+detect+draw. Self-chains via setTimeout so a new
-// capture NEVER starts before the previous finishes — xcap uses DXGI desktop
-// duplication on Windows, which crashes on concurrent/overlapping captures
-// (the stall-then-crash seen when a tooltip slowed a frame down).
-async function tick() {
-  if (!running) return;
+// --- calibration (the ONLY screen-capture path) ---
+// One full detection: capture, locate the socketed graphic full-screen, identify the socket,
+// and snap the pose to the tree. Locks `lockedPose`. On failure the previous pose is kept so a
+// bad calibrate (tooltip over the jewel, too zoomed) never wipes a working overlay.
+async function calibrate(): Promise<void> {
+  if (!active) return;
+  setText(detectEl, 'Calibrating…', 'muted');
+  let det: Detection | null = null;
   try {
-    let det: Detection | null = null;
-    try {
-      // The heavy socket-identification pass (edge map + distance transform) only
-      // runs when: not yet locked, not manually overridden, the ring has been
-      // settled for a couple of frames (never mid pan/zoom), and a throttle window
-      // has elapsed. Otherwise we pay just the cheap ring transform. This keeps the
-      // capture loop fast enough that xcap's DXGI duplication doesn't stall.
-      const now = performance.now();
-      const wantIdentify =
-        !locked && !manualOverride && stableFrames >= 2 && now - lastIdentifyMs > 700;
-      if (wantIdentify) lastIdentifyMs = now;
-      det = (await invoke('capture_and_detect', { identify: wantIdentify })) as Detection | null;
-    } catch (e) {
-      setText(statusEl, `capture error: ${e}`, 'warn');
-      return;
-    }
-    // Drop frames where the gem isn't confidently at the detected centre: a wrong/false
-    // ring would otherwise yank the highlights "way off" for a frame. Treat them like a
-    // missed detection and hold the last good pose (steady when standing still).
-    const weak = det !== null && det.jewel_match < MATCH_FLOOR;
-    if (!det || weak) {
-      const now = performance.now();
-      if (lastRing && now - lastRingMs < RING_HOLD_MS) {
-        // Ring momentarily undetectable (tooltip overlap) or the gem match is weak. Hold
-        // the last good pose so highlights persist instead of snapping to a bad centre.
-        setText(
-          detectEl,
-          weak ? `Weak match (${det!.jewel_match.toFixed(2)}) — holding.` : 'Ring hidden (tooltip?) — holding.',
-          'warn'
-        );
-        const held: Detection = {
-          cx: lastRing.cx,
-          cy: lastRing.cy,
-          r: lastRing.r,
-          support: 0,
-          coverage: 0,
-          resid: 0,
-          frame_w: lastRing.frame_w,
-          frame_h: lastRing.frame_h,
-          jewel: '',
-          jewel_match: 0,
-          gem: 0,
-          socket_id: -1,
-          socket_score: 0,
-          socket_second: 0
-        };
-        await renderProjection(held);
-      } else {
-        setText(detectEl, 'No ring detected.', 'warn');
-        setText(statusEl, 'Open the tree with the jewel socketed; zoom so the ring is visible.', 'muted');
-        resetRingFilters(); // ring lost — don't smooth across the gap
-        stableFrames = 0;
-        prevStabRing = null;
-        clearLayer();
-      }
-      return;
-    }
-
-    // Track raw-ring stability to gate the heavy identify pass: only attempt socket
-    // identification once the ring has settled, never while panning/zooming.
-    if (prevStabRing) {
-      const m = Math.hypot(det.cx - prevStabRing.cx, det.cy - prevStabRing.cy);
-      const rd = Math.abs(det.r - prevStabRing.r);
-      stableFrames = m < 10 && rd < 8 ? stableFrames + 1 : 0;
-    }
-    prevStabRing = { cx: det.cx, cy: det.cy, r: det.r };
-
-    // Commit the socket from auto-detect once (resolve-once-then-lock); after that
-    // the lock — or the user's manual choice — wins, so we stop re-identifying.
-    if (!manualOverride && !locked && det.socket_id >= 0 && indexById.has(det.socket_id)) {
-      socketIdx = indexById.get(det.socket_id)!;
-      locked = true;
-    }
+    det = (await invoke('capture_and_detect', {
+      jewel: jewelInfo?.jewel ?? null,
+      // Once a socket is locked, snap the pose to THAT socket and skip (unreliable) re-ID.
+      // Only the first calibrate (nothing chosen yet) auto-identifies the socket.
+      socketHint: socketChosen ? socket().socketId : null,
+      identify: true
+    })) as Detection | null;
+  } catch (e) {
+    setText(detectEl, `capture error: ${e}`, 'warn');
+    return;
+  }
+  if (!det || det.jewel_match < MATCH_FLOOR) {
     setText(
       detectEl,
-      `${det.jewel} · match ${det.jewel_match.toFixed(2)} · gem ${det.gem | 0}px · cov ${(det.coverage * 100) | 0}%`,
-      det.coverage >= 0.7 ? 'ok' : 'warn'
+      'Could not find the socket. Centre it, zoom so the gold socket frame is clear, move any tooltip off it, then recalibrate (Ctrl+Shift+R).',
+      'warn'
     );
-
-    // Calibrate the gem-width → tree-radius ratio once, from a settled frame (the gem's
-    // tree size is constant, so this holds across zoom). Until then, fall back to the ring.
-    if (gemTreeWidth === null && det.gem > 0 && det.r > 0 && stableFrames >= 2) {
-      gemTreeWidth = (det.gem * data.rTree) / det.r;
-    }
-    // Raw scale from the measured GEM width (static feature), as an equivalent ring radius
-    // (s = rScale / rTree). HELD by holdScale so it only changes on a real zoom.
-    const rawScale = gemTreeWidth && det.gem > 0 ? (det.gem * data.rTree) / gemTreeWidth : det.r;
-    const r = holdScale(rawScale);
-    const c = stabilizeCenter(det.cx, det.cy);
-    const sring: Detection = { ...det, cx: c.cx, cy: c.cy, r };
-    // Remember the good pose so we can hold it through a brief detection failure.
-    lastRing = { cx: c.cx, cy: c.cy, r, frame_w: det.frame_w, frame_h: det.frame_h };
-    lastRingMs = performance.now();
-
-    setText(statusEl, 'If highlights are off the nodes, cycle sockets with Ctrl+Shift+[ or ].', 'ok');
-    await renderProjection(sring);
-  } finally {
-    // Schedule the next iteration only after this one fully completes.
-    if (running) pollTimer = window.setTimeout(tick, 160);
+    return; // keep any existing lockedPose
   }
+  lockedPose = { cx: det.cx, cy: det.cy, r: det.r };
+  // Adopt the auto-identified socket ONLY on the first calibrate (nothing chosen yet); after
+  // that the socket is locked and recalibration just refreshes the pose for it.
+  if (!socketChosen && det.socket_id >= 0 && indexById.has(det.socket_id)) {
+    socketIdx = indexById.get(det.socket_id)!;
+    targetIdx = 0;
+    socketChosen = true;
+  }
+  const sock = socketChosen
+    ? ` · socket ${socketIdx + 1}/${socketList.length}`
+    : ' · socket unsure (cycle with Ctrl+Shift+[ ])';
+  setText(detectEl, `Locked: ${det.jewel} · ${(det.jewel_match * 100) | 0}%${sock}`, 'ok');
+  setText(
+    statusEl,
+    'Highlights locked. Pan/zoom or open tooltips freely; press Ctrl+Shift+R to recalibrate when they drift.',
+    'muted'
+  );
+  renderLocked();
+}
+
+// Cheap cursor-only poll (NO screen capture) so the hover indicator follows the mouse while
+// the locked pose stays put. Re-entrancy-guarded; self-reschedules while active.
+async function hoverTick(): Promise<void> {
+  if (!active) return;
+  if (lockedPose && !rendering) {
+    rendering = true;
+    try {
+      const cur = (await invoke('get_cursor')) as { x: number; y: number };
+      renderLocked(cur);
+    } catch {
+      /* cursor unavailable this tick */
+    } finally {
+      rendering = false;
+    }
+  }
+  if (active) hoverTimer = window.setTimeout(hoverTick, 120);
 }
 
 function start() {
-  running = true;
+  active = true;
   manualOverride = false;
-  locked = false;
-  gemTreeWidth = null;
-  resetRingFilters();
-  stableFrames = 0;
-  prevStabRing = null;
-  lastIdentifyMs = 0;
-  lastRing = null;
-  setText(detectEl, 'Detecting…', 'muted');
-  void tick();
+  socketChosen = false;
+  lockedPose = null;
+  void calibrate();
+  void hoverTick();
 }
 function stop() {
-  running = false;
-  if (pollTimer) window.clearTimeout(pollTimer);
+  active = false;
+  if (hoverTimer) window.clearTimeout(hoverTimer);
+  lockedPose = null;
   clearLayer();
   setText(detectEl, 'Stopped. Press Ctrl+Shift+K to start.', 'muted');
   setText(statusEl, '');
@@ -375,15 +276,19 @@ function stop() {
 }
 
 // --- hotkeys (global, from Rust) ---
-listen('toggle-run', () => (running ? stop() : start()));
+listen('toggle-run', () => (active ? stop() : start()));
+listen('recalibrate', () => {
+  if (active) void calibrate();
+});
 listen<number>('socket-cycle', (e) => {
-  if (!running) return;
+  if (!active) return;
   manualOverride = true;
+  socketChosen = true; // lock to the user's pick; recalibrate refines the pose for it
   selectSocket(socketIdx + (e.payload < 0 ? -1 : 1));
-  updateProgress();
+  renderLocked();
 });
 listen('capture-hotkey', () => {
-  if (!running) return;
+  if (!active) return;
   if (!jewelInfo) {
     setText(jewelEl, 'Read the jewel first (Ctrl+Shift+C) — recordings are keyed by seed.', 'warn');
   }
@@ -396,7 +301,7 @@ listen('capture-hotkey', () => {
   if (targetIdx >= s.notables.length) {
     setText(statusEl, `All ${s.notables.length} notables recorded. (OCR of values is next.)`, 'ok');
   }
-  updateProgress();
+  renderLocked();
 });
 
 // Jewel/seed capture from the clipboard. The seed is required for recording (the
@@ -437,4 +342,4 @@ listen<string>('debug-capture', (e) => {
   setText(statusEl, `Saved: ${e.payload}`, e.payload.startsWith('ERROR') ? 'warn' : 'ok');
 });
 
-setText(detectEl, 'Stopped. Ctrl+Shift+K start · Ctrl+Shift+S dump frame.', 'muted');
+setText(detectEl, 'Stopped. Ctrl+Shift+K to start · Ctrl+Shift+R recalibrate · Ctrl+Shift+S dump frame.', 'muted');

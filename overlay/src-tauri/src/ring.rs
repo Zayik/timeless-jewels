@@ -212,6 +212,64 @@ pub fn detect(buf: &[u8], width: u32, height: u32, jewel: Jewel) -> Option<Circl
         return None;
     }
 
+    // OUTER-EDGE refinement. The ring is a thick band of inward-pointing tick marks, so the
+    // robust band fit above sits in the noisy middle of it. The band's clean OUTER boundary is a
+    // thin circle, so per angular bin we take the outermost masked pixel — but ONLY within a
+    // TIGHT window around the fitted radius. A wide window swallows green/gold tree clutter just
+    // OUTSIDE the ring (allocated nodes/lines), which yanks the fit off-centre (seen on a real
+    // Undying frame: ~20px). The tight window keeps just the ring's outer stroke, pinning the
+    // centre + radius far tighter (residual ~2px). A guard rejects the refit if it disagrees
+    // with the robust band centre, so a pathological frame falls back to the band fit.
+    {
+        use std::f64::consts::PI;
+        const NB: usize = 180;
+        let (bcx, bcy) = (cx, cy); // robust band centre, to guard the refit against
+        let mut outer: Vec<Option<(f64, f64, f64)>> = vec![None; NB]; // best (x, y, rad) per bin
+        for &(x, y) in &orig {
+            let rr = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+            // Tight window around the band radius (slightly outward-biased to the outer stroke).
+            if rr < r - 6.0 || rr > r + 14.0 {
+                continue;
+            }
+            let ang = (y - cy).atan2(x - cx);
+            let bi = (((ang + PI) / (2.0 * PI)) * NB as f64) as usize % NB;
+            if outer[bi].map_or(true, |(_, _, pr)| rr > pr) {
+                outer[bi] = Some((x, y, rr));
+            }
+        }
+        let edge: Vec<(f64, f64)> = outer.iter().flatten().map(|&(x, y, _)| (x, y)).collect();
+        // Need most bins covered (a near-complete circle); else fall back to the band fit.
+        if edge.len() >= NB / 2 {
+            if let Some((mut ecx, mut ecy, mut er)) = kasa(&edge) {
+                for _ in 0..2 {
+                    let inl: Vec<(f64, f64)> = edge
+                        .iter()
+                        .copied()
+                        .filter(|&(x, y)| (((x - ecx).powi(2) + (y - ecy).powi(2)).sqrt() - er).abs() < 4.0)
+                        .collect();
+                    if inl.len() < NB / 2 {
+                        break;
+                    }
+                    if let Some((nx, ny, nr)) = kasa(&inl) {
+                        ecx = nx;
+                        ecy = ny;
+                        er = nr;
+                    } else {
+                        break;
+                    }
+                }
+                // Adopt only if the refit agrees with the robust band centre (a big disagreement
+                // means clutter contamination → keep the band fit).
+                let shift = ((ecx - bcx).powi(2) + (ecy - bcy).powi(2)).sqrt();
+                if er > 40.0 && er < max_r && ecx > 0.0 && ecy > 0.0 && shift < 15.0 {
+                    cx = ecx;
+                    cy = ecy;
+                    r = er;
+                }
+            }
+        }
+    }
+
     // Angular coverage + residual over ALL masked pixels that lie on the final
     // circle (within a band), to reject non-ring blobs (gold/green tree lines the
     // colour mask catches but that don't form a full circle). Judged on `orig`,

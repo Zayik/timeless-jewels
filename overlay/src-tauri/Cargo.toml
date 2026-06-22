@@ -18,13 +18,25 @@ xcap = "0.0.14"
 # Read the jewel's Ctrl+C item text straight off the OS clipboard (the click-through
 # overlay window is unfocused, so the webview's navigator.clipboard can't).
 arboard = "3"
-# Decode + resize the reference socketed-jewel PNGs for template matching (jewel-type
-# identification). PNG only — that's all the reference assets are.
+
+[dev-dependencies]
+# Only the (ignored) ring/refine benchmark uses this — to load a screenshot PNG off disk.
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# `tauri dev` builds in the dev profile. The screen-capture template matching (acquire/
+# zncc_rgb) is float-heavy and is unusably slow unoptimized (a full-screen acquire took
+# ~16s/ref at opt-level 0), so optimize the dev build. The crate is tiny, so the extra
+# compile time is negligible; deps are cached after the first build.
+[profile.dev]
+opt-level = 3
+
+# Same reason for the (ignored) acquire benchmark under the test profile.
+[profile.test]
+opt-level = 3
 
 [profile.release]
 panic = "abort"
 codegen-units = 1
 lto = true
-opt-level = "s"
+opt-level = 3
 strip = true

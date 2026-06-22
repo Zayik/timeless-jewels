@@ -12,25 +12,37 @@ the website. This tool is intentionally separate and optional.
 
 ## How it works
 
-A timeless jewel draws a colored ring around its socket on the passive tree. That
-ring is a 3-DOF anchor (centre x/y + radius). Detecting it each frame recovers the
-screen→tree transform in closed form:
+The socketed jewel draws its **radius ring** on the passive tree (green/yellow for
+Undying Hate, blue for Heroic Tragedy). That ring is a 3-DOF anchor — its centre is the
+socket's projected position and its pixel radius equals `R_tree = 1800` tree units
+exactly — so one circle fit recovers the screen→tree transform in closed form:
 
 ```
-screen = ring_centre + (node_tree − socket_tree) · (ring.r / R_tree)
+s = ring_radius_px / R_tree                       (px per tree unit)
+screen = ring_centre + (node_tree − socket_tree) · s
 ```
 
-`R_tree ≈ 1765` tree units was calibrated from the in-game ring against two
-screenshots at different zooms (Undying Hate green ring and Heroic Tragedy blue
-ring agreed to within ~1.6%). Because the ring is re-detected every frame, pan and
-zoom are absorbed automatically — no per-zoom calibration. See
-`../memory/poe2_overlay_calibration.md` (and `Screenshots/`) for the derivation.
+`R_tree = 1800` is the authoritative game constant (PoE2 "Very Large" radius), so the
+scale needs no empirical tuning. The ring is detected by colour-masking its hue and
+fitting a circle (RANSAC + Kåsa); a final **outer-edge** pass refits to the band's clean
+outer boundary (the ticks point inward), pinning centre and radius tightly. The ring's
+animation jitter is irrelevant because we detect it only on an explicit calibrate.
 
-- **Rust** (`src-tauri/`): screen capture (`xcap`), ring detection (`ring.rs`,
-  color-mask + iterative circle fit), **socket auto-identification** (`main.rs`:
-  Sobel edge map → chamfer distance transform → score the 14 sockets' projected
-  connector edges, lowest-cost wins), global cursor position, global hotkeys, and
-  a transparent click-through always-on-top window.
+**On-demand calibration.** Detection (capture + ring fit + socket-ID + tree-snap, well
+under a second) runs ONLY when you calibrate — Ctrl+Shift+K to start, Ctrl+Shift+R to
+recalibrate — and locks a fixed screen pose. Highlights are then drawn from that pose
+with no per-frame capture, so they persist while you pan/zoom or a tooltip covers the
+jewel; when they drift off the nodes you recalibrate. Cheap, and unbreakable by
+occlusion or extreme zoom. Each calibration also snaps the pose (centre + scale) to the
+socket's real tree lines (edge-chamfer `refine_pose`), so notables overlay the actual
+nodes. The socket is identified once then locked; only an explicit cycle changes it.
+
+- **Rust** (`src-tauri/`): screen capture (`xcap`), **ring detection** (`ring.rs`:
+  colour mask → RANSAC/Kåsa circle fit → outer-edge refit), **socket
+  auto-identification** (`main.rs`: Sobel edge map → chamfer distance transform → score
+  the 14 sockets' projected connector edges, lowest-cost wins) and `refine_pose`
+  (snap centre+scale to the tree), global cursor position, global hotkeys, and a
+  transparent click-through always-on-top window.
 - **TypeScript** (`src/`): projects the socket's affected notables to screen
   (`projection.ts`) and draws the highlights/guide (`main.ts`). The per-socket
   node data is extracted from the main repo's `frontend/static/data/poe2/data.json`
@@ -40,14 +52,14 @@ zoom are absorbed automatically — no per-zoom calibration. See
 
 ### Socket auto-identification
 
-The ring fixes the screen↔tree transform, but not *which* of the 14 sockets it is.
-Node icon **art changes** under a timeless jewel, so icons are unreliable; node
-**positions and the connector lines** between them do not. So for each socket we
-project its local subgraph through the ring transform and score the mean
+The graphic match fixes the screen↔tree transform, but not *which* of the 14
+sockets it is. Node icon **art changes** under a timeless jewel, so icons are
+unreliable; node **positions and the connector lines** between them do not. So for
+each socket we project its local subgraph through the transform and score the mean
 distance-transform value under the projected edges (chamfer matching) — the socket
 whose edges line up with the real tree lines scores lowest. The UI resolves the
 socket once (confident frames only; otherwise you cycle manually) and then locks
-it, so steady-state frames pay only the cheap ring transform. The approach was
+it, so steady-state frames pay only the cheap transform. The approach was
 validated offline against `Screenshots/` with `scripts/socket_match_harness.py`.
 
 ## Prerequisites
@@ -74,21 +86,27 @@ pnpm app:build        # tauri build -> installer in src-tauri/target/release/bun
 
 ## Using it
 
-1. Launch the overlay. The control panel (top-left) is interactive.
-2. Pick the **jewel** (sets the ring color to detect) and the **socket** you used.
-3. Open the passive tree in PoE2 with the jewel socketed; zoom so the ring is
-   visible.
-4. Click **Start capture** — the overlay becomes click-through and draws the ring
-   guide plus a highlight on each affected notable. The current target is gold.
-5. Hover the highlighted node in-game; press **Ctrl+Shift+J** to record it and
-   advance. Press **Ctrl+Shift+O** to toggle click-through (to reach the panel).
+1. Launch the overlay (it is always click-through; the panel top-left is informational).
+2. Open the passive tree in PoE2 with the jewel socketed; zoom/pan so the gold socket
+   frame is clearly visible (no tooltip over it).
+3. Press **Ctrl+Shift+K** to calibrate. The jewel type and socket are auto-detected and
+   a fixed pose is locked; each affected notable is highlighted (current target gold).
+4. Pan/zoom or open tooltips freely — the highlights stay put. When they drift off the
+   nodes, press **Ctrl+Shift+R** to recalibrate.
+5. Hover the highlighted node in-game; press **Ctrl+Shift+J** to record it and advance.
+   Use **Ctrl+Shift+[ / ]** to correct the socket if auto-detect picked wrong, then
+   recalibrate to snap the pose to that socket.
 
 ## Hotkeys
 
 | Key | Action |
 |---|---|
+| `Ctrl+Shift+K` | Show/hide the overlay (calibrates on show) |
+| `Ctrl+Shift+R` | Recalibrate the pose (after you pan/zoom) |
 | `Ctrl+Shift+J` | Record current target node, advance to next |
-| `Ctrl+Shift+O` | Toggle click-through (capture mode ↔ panel) |
+| `Ctrl+Shift+C` | Read the jewel (type + seed) from the Ctrl+C clipboard text |
+| `Ctrl+Shift+[` / `]` | Cycle the active socket (correct a wrong auto-detect) |
+| `Ctrl+Shift+S` | Dump a raw screen capture (for detector tuning) |
 
 ## Next milestones (not in this scaffold)
 
@@ -103,5 +121,9 @@ pnpm app:build        # tauri build -> installer in src-tauri/target/release/bun
 - DPI: highlights are converted physical→CSS via `devicePixelRatio`, assuming the
   overlay covers the **primary** monitor starting at origin. Multi-monitor and
   non-primary game windows need offset handling (not yet done).
-- Ring color thresholds are tuned to the two calibration screenshots; other
-  graphics settings/filters may need adjustment in `ring.rs`.
+- Ring colour thresholds (`ring.rs` `Jewel::matches`) are tuned to the calibration
+  screenshots; other graphics settings/filters may need adjustment. Validate a frame
+  offline with `python scripts/socket_match_harness.py <screenshot.png> [socket_id]`.
+- Calibrate at a zoom where enough of the ring is on-screen for the circle fit
+  (zoomed-out is fine — more arc, bigger radius; extreme zoom-in pushes the ring
+  off-screen). `refine_pose` then corrects any residual scale/centre error.
