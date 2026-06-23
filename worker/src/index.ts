@@ -169,6 +169,111 @@ function errorResponse(message: string, status: number, cors: Record<string, str
   });
 }
 
+// ── PoE2 contribution: anonymous, validated, idempotent ─────────────────────────
+//
+// The overlay tool POSTs observed transforms here. The Worker holds the DB credential
+// (the client never does), so writes are anonymous-but-identified by a client-supplied
+// stable UUID. The DB foreign keys guarantee the data is real (jewel/node/conqueror
+// exist, and the result notable belongs to the jewel); the unique index
+// (jewel_type, seed, node_id, client_id) makes a re-record overwrite the same client's
+// vote rather than inflate the confirmation count.
+const MAX_OBSERVATIONS = 1000;
+
+function noStoreJson(body: unknown, status: number, cors: Record<string, string>): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+async function handlePoe2Write(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>
+): Promise<Response> {
+  if (!env.DATABASE_URL) return errorResponse('database not configured', 500, cors);
+
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return errorResponse('invalid JSON body', 400, cors);
+  }
+  const p = payload as { client_id?: unknown; observations?: unknown };
+  const clientId = typeof p.client_id === 'string' ? p.client_id.trim() : '';
+  if (!clientId || clientId.length > 100) {
+    return errorResponse('missing or invalid client_id', 400, cors);
+  }
+  if (!Array.isArray(p.observations) || p.observations.length === 0) {
+    return errorResponse('observations must be a non-empty array', 400, cors);
+  }
+  if (p.observations.length > MAX_OBSERVATIONS) {
+    return errorResponse(`too many observations (max ${MAX_OBSERVATIONS})`, 400, cors);
+  }
+
+  // Shape-validate into parallel arrays for a single bulk upsert. A bad row would abort
+  // the whole batch, so reject the request early with a clear message; the DB FKs do the
+  // game-data validity check (real node, result-in-vocab-for-jewel, valid conqueror).
+  const jewelType: string[] = [];
+  const conqueror: (string | null)[] = [];
+  const seed: number[] = [];
+  const nodeId: string[] = [];
+  const resultId: string[] = [];
+  const sourceSocket: (number | null)[] = [];
+  const source: string[] = [];
+  for (const o of p.observations as Array<Record<string, unknown>>) {
+    if (
+      typeof o.jewel_type !== 'string' ||
+      typeof o.node_id !== 'string' ||
+      typeof o.result_notable_id !== 'string' ||
+      !Number.isInteger(o.seed)
+    ) {
+      return errorResponse('each observation needs jewel_type, seed, node_id, result_notable_id', 400, cors);
+    }
+    jewelType.push(o.jewel_type);
+    conqueror.push(typeof o.conqueror === 'string' && o.conqueror ? o.conqueror : null);
+    seed.push(o.seed as number);
+    nodeId.push(o.node_id);
+    resultId.push(o.result_notable_id);
+    sourceSocket.push(Number.isInteger(o.source_socket) ? (o.source_socket as number) : null);
+    source.push('capture');
+  }
+
+  // Identity is stamped server-side by the observations BEFORE-INSERT trigger from
+  // app.current_client_id(), which reads the `sub` of request.jwt.claims. We don't run a
+  // login, so we feed the anonymous contributor UUID as that claim for THIS transaction
+  // (set_config local). The trigger then stamps client_id = our UUID and applies its
+  // per-client throttle + seed-range check. client_id is therefore omitted from the insert.
+  const sql = neon(env.DATABASE_URL);
+  const claims = JSON.stringify({ sub: clientId });
+  try {
+    const results = await sql.transaction([
+      sql`SELECT set_config('request.jwt.claims', ${claims}, true)`,
+      sql`
+        INSERT INTO observations
+          (jewel_type, conqueror, seed, node_id, result_notable_id, source_socket, source)
+        SELECT * FROM unnest(
+          ${jewelType}::text[], ${conqueror}::text[], ${seed}::int[], ${nodeId}::text[],
+          ${resultId}::text[], ${sourceSocket}::int[], ${source}::text[]
+        )
+        ON CONFLICT (jewel_type, seed, node_id, client_id) DO UPDATE
+          SET result_notable_id = EXCLUDED.result_notable_id,
+              conqueror = EXCLUDED.conqueror,
+              source_socket = EXCLUDED.source_socket,
+              source = EXCLUDED.source,
+              created_at = now()
+        RETURNING id
+      `
+    ]);
+    const accepted = (results[1] as unknown[]).length;
+    return noStoreJson({ ok: true, accepted }, 200, cors);
+  } catch (e) {
+    // FK violation (unknown node/result/conqueror), seed out of range, or throttle (the
+    // trigger raises PT429). Surface it so the client decides drop (4xx) vs retry.
+    return errorResponse(`insert rejected: ${e instanceof Error ? e.message : String(e)}`, 400, cors);
+  }
+}
+
 async function handlePoe2(
   request: Request,
   url: URL,
@@ -176,6 +281,9 @@ async function handlePoe2(
   cors: Record<string, string>,
   ctx: ExecutionContext
 ): Promise<Response> {
+  if (request.method === 'POST' && url.pathname === '/api/poe2/observations') {
+    return handlePoe2Write(request, env, cors);
+  }
   if (request.method !== 'GET') {
     return errorResponse('method not allowed', 405, cors);
   }

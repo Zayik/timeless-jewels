@@ -44,6 +44,10 @@ for (const [key, n] of Object.entries(nodes)) {
     if (!m.isNotable) continue;
     affected.push({
       skill: m.skill,
+      // String node id (e.g. "Sprint10") — the community DB's tree_notables.node_id and
+      // the identifier the overlay submits for an observation. Distinct from the numeric
+      // graph `skill`. The website maps node_id -> skill on read.
+      id: m.id ?? '',
       x: Math.round(m.x * 10) / 10,
       y: Math.round(m.y * 10) / 10,
       name: m.name ?? '',

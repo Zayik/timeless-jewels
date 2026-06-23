@@ -668,6 +668,29 @@ fn ocr_region(cx: f64, cy: f64, w: f64, h: f64) -> Result<Vec<OcrLine>, String> 
     Ok(lines)
 }
 
+/// POST a batch of recorded observations (serialised by the frontend) to the Worker write
+/// endpoint. Done here rather than in the webview because the overlay's CSP blocks
+/// cross-origin fetch; from native code there's no CORS to satisfy. Returns the Worker's
+/// JSON body on success so the frontend can read accepted/rejected counts; a non-2xx
+/// status is surfaced as an error so the frontend keeps the batch pending for retry.
+#[tauri::command]
+async fn submit_observations(worker_url: String, body: String) -> Result<String, String> {
+    let url = format!("{}/api/poe2/observations", worker_url.trim_end_matches('/'));
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status.as_u16(), text));
+    }
+    Ok(text)
+}
+
 /// Copy the recorded transforms (serialised by the frontend) to the OS clipboard so the
 /// contributor can paste a submission-ready batch. Uses arboard (already a dependency)
 /// because the click-through overlay window can't reach navigator.clipboard.
@@ -753,7 +776,8 @@ fn main() {
             get_cursor,
             read_jewel,
             ocr_region,
-            export_records
+            export_records,
+            submit_observations
         ])
         .setup(move |app| {
             let gs = app.global_shortcut();

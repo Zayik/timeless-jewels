@@ -26,6 +26,8 @@ export interface TreePoint {
 
 export interface Notable extends TreePoint {
   skill: number;
+  /** String node id (e.g. "Sprint10") — the community DB's tree_notables.node_id. */
+  id: string;
   name: string;
   kind: 'notable' | 'keystone';
 }

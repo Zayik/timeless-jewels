@@ -74,6 +74,7 @@ app.innerHTML = `
     <div id="jewel" class="muted">No jewel yet. Copy it in-game (<b>Ctrl+C</b>) — auto-detected.</div>
     <div id="status" class="muted"></div>
     <div id="progress" class="muted"></div>
+    <div id="sync" class="muted"></div>
     <div id="hint" class="muted"><b>Ctrl+Shift+K</b> show/hide · <b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+J</b> record &amp; next · <b>Ctrl+Shift+C</b> read jewel · <b>Ctrl+Shift+E</b> export</div>
   </div>
   <svg id="layer"></svg>
@@ -82,6 +83,7 @@ const detectEl = document.getElementById('detect')!;
 const jewelEl = document.getElementById('jewel')!;
 const statusEl = document.getElementById('status')!;
 const progressEl = document.getElementById('progress')!;
+const syncEl = document.getElementById('sync')!;
 const layer = document.getElementById('layer') as unknown as SVGSVGElement;
 
 // --- state ---
@@ -119,19 +121,96 @@ const socket = (): Socket => socketList[socketIdx];
 // vocab id); keyed seed:socket:baseSkill so multiple seeds/sockets accumulate until export.
 interface RecordedTransform {
   jewel: string;
+  conqueror: string;
   seed: number;
   socketId: number;
   baseSkill: number;
+  /** String node id (DB tree_notables.node_id) — the identifier submitted as node_id. */
+  nodeId: string;
   baseName: string;
   resultId: string;
   resultName: string;
   confidence: number;
+  /** True once this observation has been accepted by the server. */
+  synced: boolean;
 }
 const recorded = new Map<string, RecordedTransform>();
 const recordKey = (seed: number, socketId: number, skill: number): string =>
   `${seed}:${socketId}:${skill}`;
 const isRecorded = (skill: number): boolean =>
   !!jewelInfo && recorded.has(recordKey(jewelInfo.seed, socket().socketId, skill));
+
+// --- contribution sync ---
+// Writes go to the Cloudflare Worker (which holds the DB credential); the overlay never
+// touches the DB directly. The POST is made from the Rust side (reqwest) because the
+// webview CSP blocks cross-origin fetch — see submit_observations in main.rs.
+const WORKER_BASE = 'https://timeless-jewels-proxy.davidleeanderson1991.workers.dev';
+const RECORDS_KEY = 'poe2_overlay_records';
+const CLIENT_KEY = 'poe2_overlay_client_id';
+// A stable anonymous contributor id so consensus can count distinct contributors and
+// re-recording the same node overwrites our own vote (DB upserts on jewel/seed/node/client).
+const clientId: string =
+  localStorage.getItem(CLIENT_KEY) ??
+  (() => {
+    const id = crypto.randomUUID();
+    localStorage.setItem(CLIENT_KEY, id);
+    return id;
+  })();
+let syncing = false;
+
+function saveRecords(): void {
+  localStorage.setItem(RECORDS_KEY, JSON.stringify([...recorded.entries()]));
+}
+function loadRecords(): void {
+  try {
+    const raw = localStorage.getItem(RECORDS_KEY);
+    if (!raw) return;
+    for (const [k, v] of JSON.parse(raw) as [string, RecordedTransform][]) recorded.set(k, v);
+  } catch {
+    /* corrupt store — start fresh */
+  }
+}
+const pendingSync = (): number => {
+  let n = 0;
+  for (const r of recorded.values()) if (!r.synced) n++;
+  return n;
+};
+
+// Push every not-yet-synced observation to the Worker in one batched POST. Idempotent
+// upserts make retries safe; rows the server accepts are marked synced and persisted.
+// Network/server failures leave records pending for the next flush (no data loss).
+async function flushSync(): Promise<void> {
+  if (syncing) return;
+  const batch = [...recorded.entries()].filter(([, r]) => !r.synced);
+  if (batch.length === 0) return;
+  syncing = true;
+  try {
+    const observations = batch.map(([, r]) => ({
+      jewel_type: r.jewel,
+      conqueror: r.conqueror || null,
+      seed: r.seed,
+      node_id: r.nodeId,
+      result_notable_id: r.resultId,
+      source_socket: r.socketId
+    }));
+    const body = JSON.stringify({ client_id: clientId, observations });
+    await invoke('submit_observations', { workerUrl: WORKER_BASE, body });
+    // Server accepted (FK-valid + upserted). Mark this batch synced.
+    for (const [, r] of batch) r.synced = true;
+    saveRecords();
+  } catch (e) {
+    setText(syncEl, `sync pending (${pendingSync()}) — ${e}`, 'warn');
+  } finally {
+    syncing = false;
+    updateSyncStatus();
+  }
+}
+function updateSyncStatus(): void {
+  const total = recorded.size;
+  const pending = pendingSync();
+  syncEl.textContent = total === 0 ? '' : `synced ${total - pending}/${total}${pending ? ` · ${pending} pending` : ''}`;
+  syncEl.className = pending ? 'warn' : 'ok';
+}
 
 // OCR crop box (physical px) centred on the cursor — generous so the tooltip is captured
 // whichever side of the node it flips to; the match is disambiguated by proximity.
@@ -414,14 +493,18 @@ function commitRecord(target: Notable, m: Match): void {
   const s = socket();
   recorded.set(recordKey(jewelInfo.seed, s.socketId, target.skill), {
     jewel: jewelInfo.jewel,
+    conqueror: jewelInfo.conqueror,
     seed: jewelInfo.seed,
     socketId: s.socketId,
     baseSkill: target.skill,
+    nodeId: target.id,
     baseName: target.name,
     resultId: m.id,
     resultName: m.name,
-    confidence: m.confidence
+    confidence: m.confidence,
+    synced: false
   });
+  saveRecords();
   setText(statusEl, `Recorded: ${target.name} → ${m.name} (${Math.round(m.confidence * 100)}%)`, 'ok');
   // Advance to the next not-yet-recorded notable.
   let next = targetIdx + 1;
@@ -430,6 +513,7 @@ function commitRecord(target: Notable, m: Match): void {
   if (targetIdx >= s.notables.length) {
     setText(statusEl, `All ${s.notables.length} notables recorded. Ctrl+Shift+E to export.`, 'ok');
   }
+  void flushSync();
   renderLocked();
 }
 
@@ -489,3 +573,9 @@ listen<string>('debug-capture', (e) => {
 });
 
 setText(detectEl, 'Stopped. Ctrl+Shift+K to start · Ctrl+Shift+R recalibrate · Ctrl+Shift+S dump frame.', 'muted');
+
+// Restore any records from a previous run and start the background sync: retry pending
+// observations every few seconds (idempotent upserts), so a flaky network self-heals.
+loadRecords();
+updateSyncStatus();
+setInterval(() => void flushSync(), 5000);

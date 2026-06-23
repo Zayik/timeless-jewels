@@ -5,11 +5,11 @@ timeless jewel transforms each notable into, so the data can be submitted to the
 community DB. It is **not** needed by people who only *look up* seeds — they use
 the website. This tool is intentionally separate and optional.
 
-> **Status: recording.** Highlights stay locked onto the correct in-game passive
-> nodes as you pan/zoom, and recording now reads the hovered node's tooltip via
-> on-device OCR (Windows.Media.Ocr), fuzzy-matches the result-notable name against
-> the jewel's vocabulary, and stores the transform locally (export to clipboard with
-> Ctrl+Shift+E). Submitting to the community DB is the remaining milestone.
+> **Status: contributing.** Highlights stay locked onto the correct in-game passive
+> nodes as you pan/zoom; recording reads the hovered node's tooltip via on-device OCR
+> (Windows.Media.Ocr), fuzzy-matches the result-notable name against the jewel's
+> vocabulary, and **auto-syncs** the transform to the community DB in the background
+> (clipboard export with Ctrl+Shift+E remains as a manual fallback).
 
 ## How it works
 
@@ -102,8 +102,21 @@ pnpm app:build        # tauri build -> installer in src-tauri/target/release/bun
    candidate + confidence and waits for a second **Ctrl+Shift+J** to accept; a poor read
    asks you to re-hover and retry. Use **Ctrl+Shift+[ / ]** to correct the socket if
    auto-detect picked wrong, then recalibrate.
-7. When done, **Ctrl+Shift+E** copies all recorded transforms (submission-ready JSON) to
-   the clipboard. Records accumulate across seeds/sockets until you export.
+7. Recorded transforms **auto-sync** to the community DB in the background (via the
+   Cloudflare Worker; the panel shows `synced N/M · P pending`). Each contributor has a
+   stable anonymous id, so re-recording a node overwrites your own vote and consensus
+   counts distinct contributors (verified at ≥2). Records persist across restarts and
+   retry on their own if the network is down. **Ctrl+Shift+E** copies everything recorded
+   to the clipboard (submission-ready JSON) as a manual fallback.
+
+### How submission works
+
+Writes never touch the DB directly. The overlay POSTs batches (from the Rust side, since
+the webview CSP blocks cross-origin fetch) to the Worker's `POST /api/poe2/observations`,
+which holds the DB credential, validates against the reference tables, and upserts. The
+DB's BEFORE-INSERT trigger stamps the contributor id and enforces a per-client hourly
+throttle; the `catalog_consensus` view aggregates distinct contributors. See
+`worker/scripts/seed_reference.mjs` for (re)seeding the reference tables from the game data.
 
 ## Hotkeys
 
