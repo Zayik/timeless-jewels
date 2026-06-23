@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "extract": "node scripts/extract_tree.mjs && node scripts/extract_graphs.mjs",
+    "extract": "node scripts/extract_tree.mjs && node scripts/extract_graphs.mjs && node scripts/extract_vocab.mjs",
     "extract:graphs": "node scripts/extract_graphs.mjs",
+    "extract:vocab": "node scripts/extract_vocab.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "tauri": "tauri",

@@ -1,8 +1,10 @@
 // Prevents an extra console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ocr;
 mod ring;
 
+use ocr::OcrLine;
 use ring::{detect, Jewel};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -165,6 +167,21 @@ fn parse_jewel(text: &str) -> Option<JewelInfo> {
         seed,
         conqueror: find_conqueror(text).unwrap_or_default(),
     })
+}
+
+/// Capture the primary monitor as raw RGBA8 (`w*h*4` bytes, row-major). Serialises on
+/// CAPTURE_LOCK because xcap's Windows DXGI path crashes if two captures overlap. The
+/// single capture path for everything that needs pixels (detect + OCR).
+fn capture_primary() -> Result<(Vec<u8>, u32, u32), String> {
+    let _guard = CAPTURE_LOCK.lock().map_err(|_| "capture lock poisoned")?;
+    let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
+    let monitor = monitors
+        .into_iter()
+        .find(|m| m.is_primary())
+        .ok_or("no primary monitor")?;
+    let img = monitor.capture_image().map_err(|e| e.to_string())?;
+    let (w, h) = (img.width(), img.height());
+    Ok((img.into_raw(), w, h))
 }
 
 fn graphs() -> &'static GraphData {
@@ -369,15 +386,8 @@ fn capture_and_detect(
     socket_hint: Option<i64>,
     identify: bool,
 ) -> Result<Option<Detection>, String> {
-    let _guard = CAPTURE_LOCK.lock().map_err(|_| "capture lock poisoned")?;
-    let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
-    let monitor = monitors
-        .into_iter()
-        .find(|m| m.is_primary())
-        .ok_or("no primary monitor")?;
-    let img = monitor.capture_image().map_err(|e| e.to_string())?;
-    let (w, h) = (img.width(), img.height());
-    let buf = img.as_raw();
+    let (frame, w, h) = capture_primary()?;
+    let buf: &[u8] = &frame;
     let (wu, hu) = (w as usize, h as usize);
 
     // Detect the radius ring. Restrict to the copied jewel's colour when known (cheaper, and
@@ -511,6 +521,33 @@ mod tests {
         }
     }
 
+    // OCR smoke test on a real tooltip screenshot. Capture one with Ctrl+Shift+S while a
+    // transformed-notable tooltip is open, save it as Screenshots/tooltip.png, then run:
+    //   cargo test ocr_tooltip -- --ignored --nocapture
+    // Prints the recognised lines so the notable name can be eyeballed; asserts OCR ran.
+    #[test]
+    #[ignore]
+    fn ocr_tooltip_reads_lines() {
+        let img = match image::open("../../Screenshots/tooltip.png") {
+            Ok(i) => i.to_rgba8(),
+            Err(_) => {
+                eprintln!("no Screenshots/tooltip.png — skipping");
+                return;
+            }
+        };
+        let (w, h) = (img.width(), img.height());
+        // RGBA -> BGRA (the format ocr::recognize expects).
+        let mut bgra = img.into_raw();
+        for px in bgra.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+        let lines = ocr::recognize(&bgra, w, h).expect("OCR should run");
+        for l in &lines {
+            eprintln!("  ({:.0},{:.0}) {}", l.cx, l.cy, l.text);
+        }
+        assert!(!lines.is_empty(), "expected some recognised text");
+    }
+
     #[test]
     fn dt_single_edge_pixel() {
         // One edge pixel at the centre of a 5x5 grid; 3-4 chamfer /3 should give
@@ -592,6 +629,55 @@ fn read_jewel() -> Result<Option<JewelInfo>, String> {
     Ok(parse_jewel(&text))
 }
 
+/// OCR a region of the primary monitor and return the recognised lines, each with its
+/// bounding-box centre in full-frame physical px. The region is a `w*h` box centred on
+/// (`cx`,`cy`) — the caller passes the cursor so the hovered node's tooltip is captured
+/// wherever it flips to. The crop is clamped to the frame; the caller fuzzy-matches the
+/// lines against the jewel's result-notable vocabulary.
+#[tauri::command]
+fn ocr_region(cx: f64, cy: f64, w: f64, h: f64) -> Result<Vec<OcrLine>, String> {
+    let (frame, fw, fh) = capture_primary()?;
+    let (fw_i, fh_i) = (fw as i64, fh as i64);
+    let x0 = ((cx - w / 2.0).round() as i64).clamp(0, fw_i.saturating_sub(1));
+    let y0 = ((cy - h / 2.0).round() as i64).clamp(0, fh_i.saturating_sub(1));
+    let x1 = (x0 + w.round() as i64).clamp(x0, fw_i);
+    let y1 = (y0 + h.round() as i64).clamp(y0, fh_i);
+    let (cw, ch) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    if cw == 0 || ch == 0 {
+        return Ok(Vec::new());
+    }
+    // Windows OCR wants BGRA8; xcap gives RGBA8, so swap R/B as we copy the crop.
+    let fw_us = fw as usize;
+    let mut bgra = vec![0u8; cw * ch * 4];
+    for row in 0..ch {
+        let sy = y0 as usize + row;
+        for col in 0..cw {
+            let si = (sy * fw_us + (x0 as usize + col)) * 4;
+            let di = (row * cw + col) * 4;
+            bgra[di] = frame[si + 2];
+            bgra[di + 1] = frame[si + 1];
+            bgra[di + 2] = frame[si];
+            bgra[di + 3] = frame[si + 3];
+        }
+    }
+    let mut lines = ocr::recognize(&bgra, cw as u32, ch as u32)?;
+    for l in &mut lines {
+        l.cx += x0 as f64;
+        l.cy += y0 as f64;
+    }
+    Ok(lines)
+}
+
+/// Copy the recorded transforms (serialised by the frontend) to the OS clipboard so the
+/// contributor can paste a submission-ready batch. Uses arboard (already a dependency)
+/// because the click-through overlay window can't reach navigator.clipboard.
+#[tauri::command]
+fn export_records(json: String) -> Result<(), String> {
+    let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    cb.set_text(json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Debug: save a raw primary-monitor capture to a PNG so detection masks can be
 /// tuned against the user's real graphics settings. Returns the saved path.
 fn save_debug_capture() -> Result<String, String> {
@@ -625,6 +711,8 @@ fn main() {
     let next_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::BracketRight);
     // Ctrl+Shift+C: ingest the jewel's Ctrl+C item text (jewel type + seed).
     let jewel_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyC);
+    // Ctrl+Shift+E: export recorded transforms to the clipboard.
+    let export_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
 
     tauri::Builder::default()
         .plugin(
@@ -654,6 +742,8 @@ fn main() {
                         let _ = app.emit("socket-cycle", 1i32);
                     } else if sc == &jewel_key {
                         let _ = app.emit("read-jewel", ());
+                    } else if sc == &export_key {
+                        let _ = app.emit("export-records", ());
                     }
                 })
                 .build(),
@@ -661,7 +751,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             capture_and_detect,
             get_cursor,
-            read_jewel
+            read_jewel,
+            ocr_region,
+            export_records
         ])
         .setup(move |app| {
             let gs = app.global_shortcut();
@@ -672,6 +764,7 @@ fn main() {
             gs.register(prev_key)?;
             gs.register(next_key)?;
             gs.register(jewel_key)?;
+            gs.register(export_key)?;
             if let Some(win) = app.get_webview_window("main") {
                 // Permanently click-through: the overlay never intercepts input, so
                 // it can't lock the screen or steal focus from the game. We do NOT

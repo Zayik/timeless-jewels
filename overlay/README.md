@@ -5,10 +5,11 @@ timeless jewel transforms each notable into, so the data can be submitted to the
 community DB. It is **not** needed by people who only *look up* seeds — they use
 the website. This tool is intentionally separate and optional.
 
-> **Status: scaffold.** This milestone proves the hard part — drawing highlights
-> that stay locked onto the correct in-game passive nodes as you pan and zoom.
-> Reading the transformed notable from the tooltip (OCR) is the next milestone;
-> for now, advancing through nodes just records "visited".
+> **Status: recording.** Highlights stay locked onto the correct in-game passive
+> nodes as you pan/zoom, and recording now reads the hovered node's tooltip via
+> on-device OCR (Windows.Media.Ocr), fuzzy-matches the result-notable name against
+> the jewel's vocabulary, and stores the transform locally (export to clipboard with
+> Ctrl+Shift+E). Submitting to the community DB is the remaining milestone.
 
 ## How it works
 
@@ -93,9 +94,16 @@ pnpm app:build        # tauri build -> installer in src-tauri/target/release/bun
    a fixed pose is locked; each affected notable is highlighted (current target gold).
 4. Pan/zoom or open tooltips freely — the highlights stay put. When they drift off the
    nodes, press **Ctrl+Shift+R** to recalibrate.
-5. Hover the highlighted node in-game; press **Ctrl+Shift+J** to record it and advance.
-   Use **Ctrl+Shift+[ / ]** to correct the socket if auto-detect picked wrong, then
-   recalibrate to snap the pose to that socket.
+5. Read the jewel first: hover it in-game, **Ctrl+C**, then **Ctrl+Shift+C** (or wait for
+   the auto-poll). Recordings are keyed by seed, so this is required.
+6. Hover the highlighted (gold) target node so its tooltip is visible, then press
+   **Ctrl+Shift+J**. The tooltip name is OCR'd and matched to a result notable:
+   a confident match records and advances automatically; a borderline match shows the
+   candidate + confidence and waits for a second **Ctrl+Shift+J** to accept; a poor read
+   asks you to re-hover and retry. Use **Ctrl+Shift+[ / ]** to correct the socket if
+   auto-detect picked wrong, then recalibrate.
+7. When done, **Ctrl+Shift+E** copies all recorded transforms (submission-ready JSON) to
+   the clipboard. Records accumulate across seeds/sockets until you export.
 
 ## Hotkeys
 
@@ -103,18 +111,21 @@ pnpm app:build        # tauri build -> installer in src-tauri/target/release/bun
 |---|---|
 | `Ctrl+Shift+K` | Show/hide the overlay (calibrates on show) |
 | `Ctrl+Shift+R` | Recalibrate the pose (after you pan/zoom) |
-| `Ctrl+Shift+J` | Record current target node, advance to next |
+| `Ctrl+Shift+J` | OCR + record current target node, advance (2nd press confirms a borderline match) |
 | `Ctrl+Shift+C` | Read the jewel (type + seed) from the Ctrl+C clipboard text |
+| `Ctrl+Shift+E` | Export recorded transforms to the clipboard (submission-ready JSON) |
 | `Ctrl+Shift+[` / `]` | Cycle the active socket (correct a wrong auto-detect) |
 | `Ctrl+Shift+S` | Dump a raw screen capture (for detector tuning) |
 
-## Next milestones (not in this scaffold)
+The result-notable vocabulary OCR is matched against lives in `src/poe2_vocab.json`,
+generated from the main repo's PoE2 data by `pnpm extract` (or `pnpm extract:vocab`).
 
-- OCR the tooltip header on capture, fuzzy-match to the closed vocab
-  (37 Kalguur / 51 Abyss notables), to record what each node *became*.
-- Parse seed/variant from the jewel's Ctrl+C clipboard text.
-- Submit `{jewel_type, seed, node_id, result_notable_id}` rows to the Neon write
-  path (consensus needs ≥2 confirmations).
+## Next milestones
+
+- Submit the recorded `{jewel_type, seed, node_id, result_notable_id}` rows to the Neon
+  write path (Neon Auth JWT + RLS; consensus needs ≥2 confirmations). The exported JSON
+  carries `baseSkill` + `baseName`; mapping the base node to the DB's string `node_id`
+  happens here.
 
 ## Caveats / known rough edges
 

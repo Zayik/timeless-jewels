@@ -18,6 +18,19 @@ xcap = "0.0.14"
 # Read the jewel's Ctrl+C item text straight off the OS clipboard (the click-through
 # overlay window is unfocused, so the webview's navigator.clipboard can't).
 arboard = "3"
+# On-device OCR of the transformed-notable tooltip via Windows.Media.Ocr — built into
+# Windows, so no bundled OCR binaries or trained-data files.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Globalization",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Storage_Streams",
+  "Win32_System_WinRT",
+]
 
 [dev-dependencies]
 # Only the (ignored) ring/refine benchmark uses this — to load a screenshot PNG off disk.
