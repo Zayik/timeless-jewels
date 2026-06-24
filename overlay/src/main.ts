@@ -241,6 +241,10 @@ let autoTriedSkill: number | null = null; // node already auto-attempted this dw
 let autoTries = 0; // attempts on the current node — capped so a bad node can't loop OCR
 const AUTO_MAX_TRIES = 3;
 let ocrBusy = false; // an OCR pass (manual or auto) is in flight — serialise captures
+// After a socket is fully recorded the overlay pauses: highlights cleared, no auto-record,
+// records auto-exported — a clean screen until Ctrl+Shift+N starts the next socket.
+let recordingPaused = false;
+let cycleTimer: number | undefined; // debounce the pose-refine after socket cycling
 
 function setText(el: Element, msg: string, kind: 'ok' | 'warn' | 'muted' = 'muted') {
   el.textContent = msg;
@@ -296,11 +300,12 @@ function draw(
   const nodeR = Math.max(7, ringCss.r * NODE_RADIUS_FRAC);
   const targetR = nodeR * 1.25;
   const target = projected[targetIdx];
-  // While hovering a node its in-game tooltip is open (and we're about to auto-record it) —
-  // show ONLY that node so the other circles/labels don't overlap the tooltip.
-  if (hover) {
-    const done = isRecorded(hover.notable.skill);
-    circle(hover.sx, hover.sy, nodeR * 1.15, done ? 'node done' : 'hover');
+  // While hovering an UNRECORDED node its in-game tooltip is open (and we're about to
+  // auto-record it) — show ONLY that node so the other circles/labels don't overlap the
+  // tooltip. Once it's recorded, fall through to draw everything again so the next node to
+  // capture is immediately visible.
+  if (hover && !isRecorded(hover.notable.skill)) {
+    circle(hover.sx, hover.sy, nodeR * 1.15, 'hover');
     label(hover.sx + nodeR + 6, hover.sy + nodeR + 10, hover.notable.name, 'hoverLabel');
     return;
   }
@@ -394,7 +399,7 @@ async function calibrate(): Promise<void> {
 // the locked pose stays put. Re-entrancy-guarded; self-reschedules while active.
 async function hoverTick(): Promise<void> {
   if (!active) return;
-  if (lockedPose && !rendering) {
+  if (lockedPose && !rendering && !recordingPaused) {
     rendering = true;
     try {
       const cur = (await invoke('get_cursor')) as { x: number; y: number };
@@ -440,6 +445,7 @@ function start() {
   active = true;
   manualOverride = false;
   socketChosen = false;
+  recordingPaused = false;
   lockedPose = null;
   void calibrate();
   void hoverTick();
@@ -447,6 +453,7 @@ function start() {
 function stop() {
   active = false;
   if (hoverTimer) window.clearTimeout(hoverTimer);
+  if (cycleTimer) window.clearTimeout(cycleTimer);
   lockedPose = null;
   pendingConfirm = null;
   clearLayer();
@@ -458,7 +465,9 @@ function stop() {
 // --- hotkeys (global, from Rust) ---
 listen('toggle-run', () => (active ? stop() : start()));
 listen('recalibrate', () => {
-  if (active) void calibrate();
+  if (!active) return;
+  recordingPaused = false; // resume if a completed socket had paused the overlay
+  void calibrate();
 });
 // Ctrl+Shift+N: the jewel was moved to a new socket. Unlock the socket and recalibrate so
 // it auto-identifies the new one fresh (normal recalibrate keeps the locked socket). The seed
@@ -468,6 +477,7 @@ listen('next-socket', () => {
   if (active) void newSocket();
 });
 async function newSocket(): Promise<void> {
+  recordingPaused = false;
   socketChosen = false;
   manualOverride = false;
   pendingConfirm = null;
@@ -479,9 +489,14 @@ async function newSocket(): Promise<void> {
 listen<number>('socket-cycle', (e) => {
   if (!active) return;
   manualOverride = true;
-  socketChosen = true; // lock to the user's pick; recalibrate refines the pose for it
+  socketChosen = true; // lock to the user's pick
+  recordingPaused = false;
   selectSocket(socketIdx + (e.payload < 0 ? -1 : 1));
   renderLocked();
+  // Snap the pose to the socket you land on, debounced so rapid cycling only captures
+  // once (after you stop). Correcting a wrong auto-ID is then just "cycle to the right one".
+  if (cycleTimer) window.clearTimeout(cycleTimer);
+  cycleTimer = window.setTimeout(() => void calibrate(), 350);
 });
 listen('capture-hotkey', () => void recordCurrent());
 
@@ -575,15 +590,28 @@ function commitRecord(target: Notable, m: Match): void {
   let next = targetIdx + 1;
   while (next < s.notables.length && isRecorded(s.notables[next].skill)) next++;
   targetIdx = next;
-  if (recordedHere() >= s.notables.length) {
-    setText(
-      statusEl,
-      `Socket ${socketIdx + 1}/${socketList.length} complete — move the jewel to the next socket and press Ctrl+Shift+N.`,
-      'ok'
-    );
-  }
   void flushSync();
-  renderLocked();
+  if (recordedHere() >= s.notables.length) {
+    void completeSocket();
+  } else {
+    renderLocked();
+  }
+}
+
+// Every notable in the current socket is recorded: back up to the clipboard, then pause —
+// clear the highlights and stop auto-recording so the screen is clean until the jewel is
+// moved and Ctrl+Shift+N starts the next socket.
+async function completeSocket(): Promise<void> {
+  recordingPaused = true;
+  pendingConfirm = null;
+  clearLayer();
+  await exportRecords(); // clipboard backup (auto-sync to the DB already runs in the background)
+  setText(
+    statusEl,
+    `Socket ${socketIdx + 1}/${socketList.length} complete · ${recorded.size} recorded & exported. ` +
+      `Move the jewel to the next socket and press Ctrl+Shift+N.`,
+    'ok'
+  );
 }
 
 // Ctrl+Shift+E: copy all recorded transforms to the clipboard (submission-ready JSON).
