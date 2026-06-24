@@ -161,15 +161,17 @@ let dbConsensus = new Map<string, { confirmations: number; verified: boolean }>(
 // the DB (e.g. offline, or the overlay is running a build without the fetch_consensus command).
 let dbState: 'idle' | 'loading' | 'loaded' | 'error' = 'idle';
 let dbError = '';
+const communityHas = (n: Notable): boolean => dbConsensus.has(n.id);
 const communityVerified = (n: Notable): boolean => dbConsensus.get(n.id)?.verified === true;
 const communityPartial = (n: Notable): boolean => {
   const c = dbConsensus.get(n.id);
   return !!c && !c.verified;
 };
-// "Covered" = no need for you to record it: you already did this session, OR the community
-// has it verified (>=2). A single community confirmation is NOT covered — recording it adds
-// the 2nd vote that verifies it.
-const isCovered = (n: Notable): boolean => isRecorded(n.skill) || communityVerified(n);
+// "Covered" = don't AUTO-record it: you already did, OR the community already has it (verified
+// or not). This stops auto-record from re-capturing a seed that's already in the DB (which was
+// causing capture storms / lag). To add a verifying 2nd vote to an unverified node, force it
+// with Ctrl+Shift+J — manual recording bypasses this.
+const isCovered = (n: Notable): boolean => isRecorded(n.skill) || communityHas(n);
 
 // Node name annotated with its community status, so it's clear at the point of recording
 // whether someone already captured it (and whether that capture is verified yet).
@@ -650,12 +652,16 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
   if (isRecorded(node.skill) && !manual) return;
   const key = recordKey(jewelInfo.seed, node.skill);
   ocrBusy = true;
-  // Draw only this node and let the webview composite it before the screen grab, so our
-  // overlay never sits on top of the tooltip we're trying to read.
-  captureOnly = node.skill;
-  renderLocked();
+  // For a fresh node the hover render already shows only it (clean capture, no delay needed).
+  // Only when re-recording a "covered" node — which is drawn among all the others — do we need
+  // to hide them and wait for the webview to composite before the screen grab.
+  const dirty = isCovered(node);
+  if (dirty) {
+    captureOnly = node.skill;
+    renderLocked();
+    await new Promise((r) => setTimeout(r, 150));
+  }
   try {
-    await new Promise((r) => setTimeout(r, 90));
     const dpr = window.devicePixelRatio || 1;
     const targetPhysical = { x: p.sx * dpr, y: p.sy * dpr };
     const cur = (await invoke('get_cursor')) as { x: number; y: number };
@@ -690,8 +696,10 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
     if (manual) setText(statusEl, `OCR error: ${e}`, 'warn');
   } finally {
     ocrBusy = false;
-    captureOnly = null;
-    renderLocked(); // restore the full highlight view (next hoverTick refines with hover)
+    if (dirty) {
+      captureOnly = null;
+      renderLocked(); // restore the full highlight view (next hoverTick refines with hover)
+    }
   }
 }
 
