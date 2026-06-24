@@ -6,7 +6,8 @@
       "type": "node-terminal",
       "request": "launch",
       "command": "pnpm app",
-      "cwd": "${workspaceFolder}/overlay"
+      "cwd": "${workspaceFolder}/overlay",
+      "preLaunchTask": "overlay-free-port"
     },
     {
       "name": "Overlay (Rust debug)",

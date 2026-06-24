@@ -49,6 +49,13 @@
       "problemMatcher": []
     },
     {
+      "label": "overlay-free-port",
+      "type": "shell",
+      "command": "powershell -NoProfile -Command \"try { Get-NetTCPConnection -LocalPort 5174 -State Listen -ErrorAction Stop | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } } catch {}; exit 0\"",
+      "presentation": { "reveal": "silent", "panel": "shared", "group": "dev" },
+      "problemMatcher": []
+    },
+    {
       "label": "overlay-ui",
       "type": "shell",
       "command": "pnpm run dev",
