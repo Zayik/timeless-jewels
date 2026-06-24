@@ -83,10 +83,15 @@ body {
 
 #status,
 #progress,
+#dbinfo,
 #hint {
   font-size: 12px;
   margin-top: 8px;
   line-height: 1.4;
+}
+/* Community DB summary line: violet, matching the in-tree "already recorded" highlight. */
+#dbinfo.community {
+  color: #c6a6ff;
 }
 .muted {
   color: #8a8a8a;
@@ -125,6 +130,16 @@ body {
 #layer .node.done {
   stroke: var(--good);
   fill: rgba(111, 224, 111, 0.15);
+}
+/* Already in the community DB (violet — distinct from your green "done"). Solid = verified
+   (>=2 confirmations, safe to skip); dashed = single confirmation (record it to verify). */
+#layer .node.community {
+  stroke: #b07cff;
+  fill: rgba(176, 124, 255, 0.12);
+}
+#layer .node.partial {
+  stroke: #b07cff;
+  stroke-dasharray: 4 4;
 }
 /* Target/hover use mask-SAFE colours (orange + magenta): the overlay is composited
    into the screen capture, so any cyan/gold highlight near the ring would be picked

@@ -691,6 +691,26 @@ async fn submit_observations(worker_url: String, body: String) -> Result<String,
     Ok(text)
 }
 
+/// Fetch the community consensus for a (jewel, seed) from the Worker so the overlay can show
+/// which nodes are already recorded/verified and skip them. A GET from native code (no CORS),
+/// same reason as submit_observations. Returns the Worker's JSON body.
+#[tauri::command]
+async fn fetch_consensus(worker_url: String, jewel: String, seed: u32) -> Result<String, String> {
+    let seed_s = seed.to_string();
+    let resp = reqwest::Client::new()
+        .get(format!("{}/api/poe2/consensus", worker_url.trim_end_matches('/')))
+        .query(&[("jewel", jewel.as_str()), ("seed", seed_s.as_str())])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status.as_u16(), text));
+    }
+    Ok(text)
+}
+
 /// Copy the recorded transforms (serialised by the frontend) to the OS clipboard so the
 /// contributor can paste a submission-ready batch. Uses arboard (already a dependency)
 /// because the click-through overlay window can't reach navigator.clipboard.
@@ -781,7 +801,8 @@ fn main() {
             read_jewel,
             ocr_region,
             export_records,
-            submit_observations
+            submit_observations,
+            fetch_consensus
         ])
         .setup(move |app| {
             let gs = app.global_shortcut();

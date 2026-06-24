@@ -73,6 +73,7 @@ app.innerHTML = `
     <h1>PoE2 Jewel Overlay <span class="tag">calibrate</span></h1>
     <div id="detect" class="muted">Stopped. Press <b>Ctrl+Shift+K</b> to start.</div>
     <div id="jewel" class="muted">No jewel yet. Copy it in-game (<b>Ctrl+C</b>) — auto-detected.</div>
+    <div id="dbinfo" class="muted"></div>
     <div id="status" class="muted"></div>
     <div id="progress" class="muted"></div>
     <div id="sync" class="muted"></div>
@@ -82,6 +83,7 @@ app.innerHTML = `
 `;
 const detectEl = document.getElementById('detect')!;
 const jewelEl = document.getElementById('jewel')!;
+const dbInfoEl = document.getElementById('dbinfo')!;
 const statusEl = document.getElementById('status')!;
 const progressEl = document.getElementById('progress')!;
 const syncEl = document.getElementById('sync')!;
@@ -142,6 +144,20 @@ const recorded = new Map<string, RecordedTransform>();
 const recordKey = (seed: number, skill: number): string => `${seed}:${skill}`;
 const isRecorded = (skill: number): boolean =>
   !!jewelInfo && recorded.has(recordKey(jewelInfo.seed, skill));
+
+// Community consensus for the current seed, keyed by string node_id (tree_notables.node_id).
+// Loaded from the Worker when a jewel is read, so the overlay can show what others already
+// recorded and avoid redoing verified nodes.
+let dbConsensus = new Map<string, { confirmations: number; verified: boolean }>();
+const communityVerified = (n: Notable): boolean => dbConsensus.get(n.id)?.verified === true;
+const communityPartial = (n: Notable): boolean => {
+  const c = dbConsensus.get(n.id);
+  return !!c && !c.verified;
+};
+// "Covered" = no need for you to record it: you already did this session, OR the community
+// has it verified (>=2). A single community confirmation is NOT covered — recording it adds
+// the 2nd vote that verifies it.
+const isCovered = (n: Notable): boolean => isRecorded(n.skill) || communityVerified(n);
 
 // --- contribution sync ---
 // Writes go to the Cloudflare Worker (which holds the DB credential); the overlay never
@@ -219,6 +235,48 @@ function updateSyncStatus(): void {
   syncEl.className = pending ? 'warn' : 'ok';
 }
 
+// Pull the community consensus for a (jewel, seed) so already-recorded nodes are shown and
+// verified ones skipped — avoids redoing a jewel someone else already mapped. Best-effort:
+// offline / not-found just leaves the map empty and recording proceeds as normal.
+async function loadConsensus(jewel: string, seed: number): Promise<void> {
+  dbConsensus = new Map();
+  updateDbInfo();
+  try {
+    const raw = (await invoke('fetch_consensus', { workerUrl: WORKER_BASE, jewel, seed })) as string;
+    const data = JSON.parse(raw) as {
+      results?: Array<{ node_id: string; confirmations: number; verified: boolean }>;
+    };
+    for (const r of data.results ?? []) {
+      dbConsensus.set(r.node_id, { confirmations: r.confirmations, verified: r.verified });
+    }
+  } catch {
+    /* offline / endpoint down — proceed with no community data */
+  }
+  updateDbInfo();
+  resetTargetToFirstUnrecorded();
+  if (active && lockedPose && !recordingPaused) renderLocked();
+}
+
+function updateDbInfo(): void {
+  if (!jewelInfo) {
+    dbInfoEl.textContent = '';
+    dbInfoEl.className = 'muted';
+    return;
+  }
+  if (dbConsensus.size === 0) {
+    dbInfoEl.textContent = 'Community: no records for this seed yet — you’re first!';
+    dbInfoEl.className = 'community';
+    return;
+  }
+  let verified = 0;
+  for (const c of dbConsensus.values()) if (c.verified) verified++;
+  const partial = dbConsensus.size - verified;
+  dbInfoEl.textContent =
+    `Community (seed ${jewelInfo.seed}): ${verified} verified` +
+    `${partial ? `, ${partial} need 1 more` : ''} — verified are skipped.`;
+  dbInfoEl.className = 'community';
+}
+
 // OCR crop box (physical px) centred on the cursor — generous so the tooltip is captured
 // whichever side of the node it flips to; the match is disambiguated by proximity.
 const OCR_BOX_W = 1400;
@@ -250,16 +308,17 @@ function setText(el: Element, msg: string, kind: 'ok' | 'warn' | 'muted' = 'mute
   el.textContent = msg;
   el.className = kind === 'muted' ? 'muted' : kind;
 }
-function recordedHere(): number {
+// How many of the current socket's notables are covered (recorded by you OR community-verified).
+function coveredHere(): number {
   const s = socket();
-  return s.notables.reduce((n, x) => n + (isRecorded(x.skill) ? 1 : 0), 0);
+  return s.notables.reduce((n, x) => n + (isCovered(x) ? 1 : 0), 0);
 }
 function updateProgress() {
   if (active && lockedPose) {
     const s = socket();
     progressEl.textContent =
       `Socket ${socketIdx + 1}/${socketList.length} (${s.id} · ${posLabel(s)})` +
-      `${manualOverride ? ' [manual]' : ''} · target ${Math.min(targetIdx + 1, s.notables.length)}/${s.notables.length} · recorded ${recordedHere()}/${s.notables.length}` +
+      `${manualOverride ? ' [manual]' : ''} · ${coveredHere()}/${s.notables.length} done` +
       ` · Ctrl+Shift+[ ] to change`;
   } else {
     progressEl.textContent = '';
@@ -304,14 +363,22 @@ function draw(
   // auto-record it) — show ONLY that node so the other circles/labels don't overlap the
   // tooltip. Once it's recorded, fall through to draw everything again so the next node to
   // capture is immediately visible.
-  if (hover && !isRecorded(hover.notable.skill)) {
+  if (hover && !isCovered(hover.notable)) {
     circle(hover.sx, hover.sy, nodeR * 1.15, 'hover');
     label(hover.sx + nodeR + 6, hover.sy + nodeR + 10, hover.notable.name, 'hoverLabel');
     return;
   }
   projected.forEach((p, i) => {
+    const n = p.notable;
     const isTarget = i === targetIdx;
-    const cls = isTarget ? 'node target' : isRecorded(p.notable.skill) ? 'node done' : 'node';
+    // Precedence: your record (green) > community-verified (violet, skip) > target (orange)
+    // > community single-confirmation (violet dashed, still record) > to-do (white).
+    let cls: string;
+    if (isRecorded(n.skill)) cls = 'node done';
+    else if (communityVerified(n)) cls = 'node community';
+    else if (isTarget) cls = 'node target';
+    else if (communityPartial(n)) cls = 'node partial';
+    else cls = 'node';
     circle(p.sx, p.sy, isTarget ? targetR : nodeR, cls);
   });
   if (target) label(target.sx + targetR + 6, target.sy - targetR, `→ ${target.notable.name}`, 'targetLabel');
@@ -338,12 +405,12 @@ function selectSocket(idx: number) {
   resetTargetToFirstUnrecorded();
 }
 
-// Point the target at the first not-yet-recorded notable in the current socket (or the
-// last if all are done), so recording resumes where it left off after a socket/seed switch.
+// Point the target at the first not-yet-covered notable (you haven't recorded it and the
+// community hasn't verified it), so recording resumes where it's actually needed.
 function resetTargetToFirstUnrecorded() {
   const s = socket();
   let i = 0;
-  while (i < s.notables.length && isRecorded(s.notables[i].skill)) i++;
+  while (i < s.notables.length && isCovered(s.notables[i])) i++;
   targetIdx = Math.min(i, Math.max(s.notables.length - 1, 0));
 }
 
@@ -430,7 +497,7 @@ function maybeAutoRecord(hover: ProjectedNode | null): void {
     }
   }
   if (!hover || skill === null) return;
-  if (ocrBusy || autoTriedSkill === skill || isRecorded(skill)) return;
+  if (ocrBusy || autoTriedSkill === skill || isCovered(hover.notable)) return;
   if (Date.now() - hoverStart < DWELL_MS) return;
   autoTriedSkill = skill; // attempted this dwell — recordNode may reschedule a retry
   autoTries++;
@@ -586,12 +653,12 @@ function commitRecord(target: Notable, m: Match): void {
   });
   saveRecords();
   setText(statusEl, `Recorded: ${target.name} → ${m.name} (${Math.round(m.confidence * 100)}%)`, 'ok');
-  // Advance to the next not-yet-recorded notable.
+  // Advance to the next not-yet-covered notable.
   let next = targetIdx + 1;
-  while (next < s.notables.length && isRecorded(s.notables[next].skill)) next++;
+  while (next < s.notables.length && isCovered(s.notables[next])) next++;
   targetIdx = next;
   void flushSync();
-  if (recordedHere() >= s.notables.length) {
+  if (coveredHere() >= s.notables.length) {
     void completeSocket();
   } else {
     renderLocked();
@@ -656,6 +723,8 @@ async function readJewelFromClipboard(verbose: boolean): Promise<void> {
     pendingConfirm = null;
     resetTargetToFirstUnrecorded();
     updateProgress();
+    // Pull what the community already has for this seed (verified nodes get skipped).
+    void loadConsensus(info.jewel, info.seed);
   } catch (e) {
     if (verbose) setText(jewelEl, `clipboard error: ${e}`, 'warn');
   }
