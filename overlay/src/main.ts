@@ -161,17 +161,16 @@ let dbConsensus = new Map<string, { confirmations: number; verified: boolean }>(
 // the DB (e.g. offline, or the overlay is running a build without the fetch_consensus command).
 let dbState: 'idle' | 'loading' | 'loaded' | 'error' = 'idle';
 let dbError = '';
-const communityHas = (n: Notable): boolean => dbConsensus.has(n.id);
 const communityVerified = (n: Notable): boolean => dbConsensus.get(n.id)?.verified === true;
 const communityPartial = (n: Notable): boolean => {
   const c = dbConsensus.get(n.id);
   return !!c && !c.verified;
 };
-// "Covered" = don't AUTO-record it: you already did, OR the community already has it (verified
-// or not). This stops auto-record from re-capturing a seed that's already in the DB (which was
-// causing capture storms / lag). To add a verifying 2nd vote to an unverified node, force it
-// with Ctrl+Shift+J — manual recording bypasses this.
-const isCovered = (n: Notable): boolean => isRecorded(n.skill) || communityHas(n);
+// "Covered" = genuinely done, skip it: you recorded it this session, OR it's already verified
+// (>=2 sources). A SINGLE unverified community record is NOT covered — it behaves like a fresh
+// node (orange target, hover-focus, auto-record) so you can add the verifying 2nd source; the
+// only difference is the "needs verify" annotation.
+const isCovered = (n: Notable): boolean => isRecorded(n.skill) || communityVerified(n);
 
 // Node name annotated with its community status, so it's clear at the point of recording
 // whether someone already captured it (and whether that capture is verified yet).
