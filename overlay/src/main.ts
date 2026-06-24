@@ -77,7 +77,15 @@ app.innerHTML = `
     <div id="status" class="muted"></div>
     <div id="progress" class="muted"></div>
     <div id="sync" class="muted"></div>
-    <div id="hint" class="muted">Hover a node to auto-record · <b>Ctrl+Shift+N</b> new socket · <b>Ctrl+Shift+K</b> show/hide · <b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+J</b> force/confirm · <b>Ctrl+Shift+C</b> read jewel · <b>Ctrl+Shift+E</b> export</div>
+    <div id="hint" class="muted">
+      <div>Hover a node to auto-record</div>
+      <div><b>Ctrl+Shift+J</b> force / re-record / confirm</div>
+      <div><b>Ctrl+Shift+N</b> new socket</div>
+      <div><b>Ctrl+Shift+R</b> recalibrate</div>
+      <div><b>Ctrl+Shift+C</b> read jewel</div>
+      <div><b>Ctrl+Shift+E</b> export</div>
+      <div><b>Ctrl+Shift+K</b> show / hide</div>
+    </div>
   </div>
   <svg id="layer"></svg>
 `;
@@ -330,6 +338,10 @@ let autoTriedSkill: number | null = null; // node already auto-attempted this dw
 let autoTries = 0; // attempts on the current node — capped so a bad node can't loop OCR
 const AUTO_MAX_TRIES = 3;
 let ocrBusy = false; // an OCR pass (manual or auto) is in flight — serialise captures
+// While capturing, the screen grab includes our own overlay, so we draw ONLY the node being
+// recorded — otherwise the other circles sit on top of the in-game tooltip and OCR can't read
+// it (this is what made re-recording a covered node stall with all highlights stuck up).
+let captureOnly: number | null = null;
 // After a socket is fully recorded the overlay pauses: highlights cleared, no auto-record,
 // records auto-exported — a clean screen until Ctrl+Shift+N starts the next socket.
 let recordingPaused = false;
@@ -390,6 +402,16 @@ function draw(
   const nodeR = Math.max(7, ringCss.r * NODE_RADIUS_FRAC);
   const targetR = nodeR * 1.25;
   const target = projected[targetIdx];
+  // During an OCR capture, show ONLY the node being recorded so our overlay doesn't occlude
+  // the tooltip in the screen grab (applies even to covered nodes being re-recorded).
+  if (captureOnly !== null) {
+    const cap = projected.find((p) => p.notable.skill === captureOnly);
+    if (cap) {
+      circle(cap.sx, cap.sy, nodeR * 1.15, 'hover');
+      label(cap.sx + nodeR + 6, cap.sy + nodeR + 10, nodeLabel(cap.notable), 'hoverLabel');
+    }
+    return;
+  }
   // While hovering an UNRECORDED node its in-game tooltip is open (and we're about to
   // auto-record it) — show ONLY that node so the other circles/labels don't overlap the
   // tooltip. Once it's recorded, fall through to draw everything again so the next node to
@@ -628,7 +650,12 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
   if (isRecorded(node.skill) && !manual) return;
   const key = recordKey(jewelInfo.seed, node.skill);
   ocrBusy = true;
+  // Draw only this node and let the webview composite it before the screen grab, so our
+  // overlay never sits on top of the tooltip we're trying to read.
+  captureOnly = node.skill;
+  renderLocked();
   try {
+    await new Promise((r) => setTimeout(r, 90));
     const dpr = window.devicePixelRatio || 1;
     const targetPhysical = { x: p.sx * dpr, y: p.sy * dpr };
     const cur = (await invoke('get_cursor')) as { x: number; y: number };
@@ -663,6 +690,8 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
     if (manual) setText(statusEl, `OCR error: ${e}`, 'warn');
   } finally {
     ocrBusy = false;
+    captureOnly = null;
+    renderLocked(); // restore the full highlight view (next hoverTick refines with hover)
   }
 }
 
