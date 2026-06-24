@@ -2,18 +2,41 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Dev Server (Edge)",
-      "type": "msedge",
+      "name": "Overlay",
+      "type": "node-terminal",
       "request": "launch",
-      "url": "http://localhost:5173",
-      "preLaunchTask": "frontend-dev"
+      "command": "pnpm app",
+      "cwd": "${workspaceFolder}/overlay"
     },
     {
-      "name": "Dev Server (Chrome)",
+      "name": "Overlay (Rust debug)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/overlay/src-tauri/target/debug/poe2-jewel-overlay.exe",
+      "cwd": "${workspaceFolder}/overlay/src-tauri",
+      "console": "integratedTerminal",
+      "preLaunchTask": "overlay-prep"
+    },
+    {
+      "name": "Site (Chrome)",
       "type": "chrome",
       "request": "launch",
       "url": "http://localhost:5173",
-      "preLaunchTask": "frontend-dev"
+      "preLaunchTask": "site+worker"
+    },
+    {
+      "name": "Site (Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "preLaunchTask": "site+worker"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Run All (Site + Worker + Overlay)",
+      "configurations": ["Site (Chrome)", "Overlay"],
+      "stopAll": true
     }
   ]
 }
