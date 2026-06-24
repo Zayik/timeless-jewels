@@ -1,18 +1,15 @@
-// PoE2 jewel-capture overlay — on-demand calibration, always click-through.
+// PoE2 jewel-capture overlay — one-button recording, always click-through.
 //
 // The overlay window never intercepts input (it can't lock the screen or steal focus).
-// Detection (screen capture + socketed-graphic template match + tree-snap) runs ONLY when you
-// calibrate — Ctrl+Shift+K to start, Ctrl+Shift+R to recalibrate — locking a fixed screen pose.
-// Highlights are drawn from that pose and persist while you pan/zoom or a tooltip covers the
-// jewel; when they drift off the nodes you recalibrate. This is cheap (no per-frame capture)
-// and robust (occlusion/zoom can't break a held pose). All control is via global hotkeys:
-//   Ctrl+Shift+K = show/hide · Ctrl+Shift+R = recalibrate · Ctrl+Shift+C = read jewel (seed)
-//   Ctrl+Shift+E = export recorded transforms to clipboard · Ctrl+Shift+J = force/confirm
-// Recording is hands-free: rest the cursor on a notable so its in-game tooltip appears and,
-// after a short dwell, the overlay OCRs it (Windows.Media.Ocr), fuzzy-matches the result
-// name against the jewel's vocabulary, and records the transform {seed, socket, base node →
-// result notable}. High-confidence matches record automatically; borderline ones wait for a
-// Ctrl+Shift+J to confirm. Ctrl+Shift+J also force-reads the hovered node on demand.
+// ONE hotkey drives everything: Ctrl+Shift+K — "Start recording jewel" reads the jewel from
+// the clipboard (for the seed), detects the socket it's plugged into, and begins recording;
+// pressing it again stops. Recording is hands-free: rest the cursor on a notable so its in-game
+// tooltip appears and, after a short dwell, the overlay OCRs it (Windows.Media.Ocr), fuzzy-
+// matches the result name against the jewel's vocabulary, and records {seed, socket, base node
+// → result notable}, syncing in the background. When every notable in the socket is captured it
+// auto-finishes ("Jewel successfully recorded") and returns to idle — move the jewel to the next
+// socket and press Ctrl+Shift+K again to detect and record it.
+// Helpers: Ctrl+Shift+R recalibrate the pose · Ctrl+Shift+[ ] correct a wrong socket guess.
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -70,25 +67,21 @@ const MATCH_FLOOR = 0.3;
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <div id="panel">
-    <h1>PoE2 Jewel Overlay <span class="tag">calibrate</span></h1>
-    <div id="detect" class="muted">Stopped. Press <b>Ctrl+Shift+K</b> to start.</div>
-    <div id="jewel" class="muted">No jewel yet. Copy it in-game (<b>Ctrl+C</b>) — auto-detected.</div>
+    <div id="mode" class="mode">▶ Start recording jewel <span class="key">Ctrl+Shift+K</span></div>
+    <div id="detect" class="muted">Copy the jewel in-game (Ctrl+C), then press Ctrl+Shift+K.</div>
+    <div id="jewel" class="muted"></div>
     <div id="dbinfo" class="muted"></div>
     <div id="status" class="muted"></div>
     <div id="progress" class="muted"></div>
     <div id="sync" class="muted"></div>
     <div id="hint" class="muted">
-      <div>Hover a node to auto-record</div>
-      <div><b>Ctrl+Shift+J</b> force / re-record / confirm</div>
-      <div><b>Ctrl+Shift+N</b> new socket</div>
-      <div><b>Ctrl+Shift+R</b> recalibrate</div>
-      <div><b>Ctrl+Shift+C</b> read jewel</div>
-      <div><b>Ctrl+Shift+E</b> export</div>
-      <div><b>Ctrl+Shift+K</b> show / hide</div>
+      <div>Hover a node to auto-record it</div>
+      <div><b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+[ ]</b> fix socket</div>
     </div>
   </div>
   <svg id="layer"></svg>
 `;
+const modeEl = document.getElementById('mode')!;
 const detectEl = document.getElementById('detect')!;
 const jewelEl = document.getElementById('jewel')!;
 const dbInfoEl = document.getElementById('dbinfo')!;
@@ -96,6 +89,12 @@ const statusEl = document.getElementById('status')!;
 const progressEl = document.getElementById('progress')!;
 const syncEl = document.getElementById('sync')!;
 const layer = document.getElementById('layer') as unknown as SVGSVGElement;
+function updateModeLabel(): void {
+  modeEl.innerHTML = active
+    ? '■ Stop recording jewel <span class="key">Ctrl+Shift+K</span>'
+    : '▶ Start recording jewel <span class="key">Ctrl+Shift+K</span>';
+  modeEl.className = active ? 'mode recording' : 'mode';
+}
 
 // --- state ---
 // On-demand calibration model: detection (the expensive screen-capture + template match) runs
@@ -281,7 +280,7 @@ async function loadConsensus(jewel: string, seed: number): Promise<void> {
   }
   updateDbInfo();
   resetTargetToFirstUnrecorded();
-  if (active && lockedPose && !recordingPaused) renderLocked();
+  if (active && lockedPose) renderLocked();
 }
 
 function updateDbInfo(): void {
@@ -321,45 +320,22 @@ function updateDbInfo(): void {
 // whichever side of the node it flips to; the match is disambiguated by proximity.
 const OCR_BOX_W = 1400;
 const OCR_BOX_H = 1200;
-// Confidence tiers: auto-record at/above ACCEPT, ask to confirm down to CONFIRM, reject below.
-const ACCEPT = 0.92;
-const CONFIRM = 0.75;
-// A borderline match awaiting a Ctrl+Shift+J to accept, with the node it was matched on.
-let pendingConfirm: { key: string; match: Match; node: Notable } | null = null;
+// Auto-record any match at or above this confidence; below it, retry the dwell then move on.
+const ACCEPT = 0.75;
 const jewelVocab = (): Vocab[] => (jewelInfo ? (vocab[jewelInfo.jewel] ?? []) : []);
 
 // --- hover auto-record ---
 // Resting the cursor on a notable (so its in-game tooltip is up) for DWELL_MS auto-OCRs and
-// records it — no keypress. Ctrl+Shift+J stays as a manual force / borderline-confirm.
+// records it — no keypress.
 const DWELL_MS = 450; // hover this long before auto-reading (tooltip needs to be visible)
-let lastHover: ProjectedNode | null = null; // most recent hovered node (for the manual key)
+let lastHover: ProjectedNode | null = null; // most recent hovered node
 let hoverSkill: number | null = null; // skill currently under the cursor
 let hoverStart = 0; // when the cursor settled on hoverSkill (Date.now)
 let autoTriedSkill: number | null = null; // node already auto-attempted this dwell (don't spam)
 let autoTries = 0; // attempts on the current node — capped so a bad node can't loop OCR
 const AUTO_MAX_TRIES = 3;
-let ocrBusy = false; // an OCR pass (manual or auto) is in flight — serialise captures
-// While capturing, the screen grab includes our own overlay, so we draw ONLY the node being
-// recorded — otherwise the other circles sit on top of the in-game tooltip and OCR can't read
-// it (this is what made re-recording a covered node stall with all highlights stuck up).
-let captureOnly: number | null = null;
-// After a socket is fully recorded the overlay pauses: highlights cleared, no auto-record,
-// records auto-exported — a clean screen until Ctrl+Shift+N starts the next socket.
-let recordingPaused = false;
+let ocrBusy = false; // an OCR pass is in flight — serialise captures
 let cycleTimer: number | undefined; // debounce the pose-refine after socket cycling
-
-// --- auto-detect a moved jewel ---
-// When idle (not actively recording) we periodically check whether the jewel's ring is still
-// there. The ring vanishes when you unsocket the jewel (panning/zooming never removes it), so a
-// sustained absence → reappearance means it was plugged into a new spot → auto re-detect the
-// socket. Only runs while idle so it adds no captures during recording (no lag).
-const WATCH_INTERVAL = 2000; // how often the idle ring-check fires
-const WATCH_IDLE_MS = 1500; // require this long since the last capture before checking
-const RING_ABSENT_THRESHOLD = 2; // consecutive absent checks (~4s) before "jewel removed"
-let watchTimer: number | undefined;
-let ringAbsentCount = 0;
-let jewelLifted = false; // ring has been absent long enough to count as removed
-let lastCaptureAt = 0; // timestamp of the last screen capture (recording or calibrate)
 
 function setText(el: Element, msg: string, kind: 'ok' | 'warn' | 'muted' = 'muted') {
   el.textContent = msg;
@@ -416,16 +392,6 @@ function draw(
   const nodeR = Math.max(7, ringCss.r * NODE_RADIUS_FRAC);
   const targetR = nodeR * 1.25;
   const target = projected[targetIdx];
-  // During an OCR capture, show ONLY the node being recorded so our overlay doesn't occlude
-  // the tooltip in the screen grab (applies even to covered nodes being re-recorded).
-  if (captureOnly !== null) {
-    const cap = projected.find((p) => p.notable.skill === captureOnly);
-    if (cap) {
-      circle(cap.sx, cap.sy, nodeR * 1.15, 'hover');
-      label(cap.sx + nodeR + 6, cap.sy + nodeR + 10, nodeLabel(cap.notable), 'hoverLabel');
-    }
-    return;
-  }
   // While hovering an UNRECORDED node its in-game tooltip is open (and we're about to
   // auto-record it) — show ONLY that node so the other circles/labels don't overlap the
   // tooltip. Once it's recorded, fall through to draw everything again so the next node to
@@ -468,7 +434,6 @@ function renderLocked(cursorPhysical?: { x: number; y: number }): ProjectedNode 
 
 function selectSocket(idx: number) {
   socketIdx = ((idx % socketList.length) + socketList.length) % socketList.length;
-  pendingConfirm = null;
   resetTargetToFirstUnrecorded();
 }
 
@@ -487,8 +452,7 @@ function resetTargetToFirstUnrecorded() {
 // bad calibrate (tooltip over the jewel, too zoomed) never wipes a working overlay.
 async function calibrate(): Promise<void> {
   if (!active) return;
-  setText(detectEl, 'Calibrating…', 'muted');
-  lastCaptureAt = Date.now(); // a capture is happening — keep the idle ring-watch quiet
+  setText(detectEl, 'Detecting the jewel socket…', 'muted');
   let det: Detection | null = null;
   try {
     det = (await invoke('capture_and_detect', {
@@ -534,7 +498,7 @@ async function calibrate(): Promise<void> {
 // the locked pose stays put. Re-entrancy-guarded; self-reschedules while active.
 async function hoverTick(): Promise<void> {
   if (!active) return;
-  if (lockedPose && !rendering && !recordingPaused) {
+  if (lockedPose && !rendering) {
     rendering = true;
     try {
       const cur = (await invoke('get_cursor')) as { x: number; y: number };
@@ -549,44 +513,6 @@ async function hoverTick(): Promise<void> {
   if (active) hoverTimer = window.setTimeout(hoverTick, 120);
 }
 
-// Idle watch: while you're NOT actively recording, periodically check whether the jewel's
-// ring is still present. Unsocketing the jewel makes the ring vanish (pan/zoom never does), so
-// a sustained absence then reappearance means it was moved to a new socket → auto re-detect.
-// Skips entirely while recording (recent capture) so it never adds capture load there.
-async function watchTick(): Promise<void> {
-  if (!active) return;
-  const idle = Date.now() - lastCaptureAt > WATCH_IDLE_MS;
-  if (lockedPose && jewelInfo && !ocrBusy && !rendering && idle) {
-    try {
-      const det = (await invoke('capture_and_detect', {
-        jewel: jewelInfo.jewel,
-        socketHint: null,
-        identify: false // ring presence only — cheap, no socket scoring
-      })) as Detection | null;
-      lastCaptureAt = Date.now();
-      const present = !!det && det.jewel_match >= MATCH_FLOOR;
-      if (present && jewelLifted) {
-        // Removed then re-placed → treat as a new socket and re-identify it.
-        jewelLifted = false;
-        ringAbsentCount = 0;
-        setText(detectEl, 'New socket detected — calibrating…', 'muted');
-        await newSocket();
-      } else if (present) {
-        ringAbsentCount = 0;
-      } else {
-        ringAbsentCount++;
-        if (ringAbsentCount >= RING_ABSENT_THRESHOLD && !jewelLifted) {
-          jewelLifted = true;
-          setText(detectEl, 'Jewel removed — plug it into the next socket to auto-detect.', 'muted');
-        }
-      }
-    } catch {
-      /* capture failed this tick — ignore */
-    }
-  }
-  if (active) watchTimer = window.setTimeout(watchTick, WATCH_INTERVAL);
-}
-
 // Auto-record the node the cursor is resting on once its tooltip has had time to appear.
 // Tracks dwell per node so we OCR a node at most once per hover (re-hover to retry); the
 // OCR itself runs in recordNode, serialised by ocrBusy.
@@ -597,126 +523,71 @@ function maybeAutoRecord(hover: ProjectedNode | null): void {
     hoverStart = Date.now();
     autoTriedSkill = null;
     autoTries = 0;
-    // Moving off the node abandons an unconfirmed borderline match.
-    if (pendingConfirm && (skill === null || pendingConfirm.node.skill !== skill)) {
-      pendingConfirm = null;
-    }
   }
-  if (!hover || skill === null) return;
+  if (!hover || skill === null || !jewelInfo) return;
   if (ocrBusy || autoTriedSkill === skill || isCovered(hover.notable)) return;
   if (Date.now() - hoverStart < DWELL_MS) return;
   autoTriedSkill = skill; // attempted this dwell — recordNode may reschedule a retry
   autoTries++;
-  if (!jewelInfo) {
-    setText(jewelEl, 'Read the jewel first (Ctrl+Shift+C) — recordings are keyed by seed.', 'warn');
-    return;
-  }
-  void recordNode(hover, false);
+  void recordNode(hover);
 }
 
-function start() {
+// Ctrl+Shift+K (idle): start recording. Reads the jewel from the clipboard for the seed, then
+// detects the socket it's plugged into and begins. Pressing K while recording stops.
+async function startRecording(): Promise<void> {
+  await readJewelFromClipboard(false); // pick up the jewel/seed from the clipboard
+  if (!jewelInfo) {
+    setText(detectEl, 'No jewel on the clipboard — copy it in-game (Ctrl+C), then press Ctrl+Shift+K.', 'warn');
+    return; // stay idle
+  }
   active = true;
   manualOverride = false;
-  socketChosen = false;
-  recordingPaused = false;
-  jewelLifted = false;
-  ringAbsentCount = 0;
+  socketChosen = false; // fresh socket detection each start — this is how a moved jewel is handled
   lockedPose = null;
+  hoverSkill = null;
+  updateModeLabel();
   void calibrate();
   void hoverTick();
-  void watchTick();
 }
-function stop() {
+
+function stopRecording(message: string, kind: 'ok' | 'muted' = 'muted'): void {
   active = false;
   if (hoverTimer) window.clearTimeout(hoverTimer);
   if (cycleTimer) window.clearTimeout(cycleTimer);
-  if (watchTimer) window.clearTimeout(watchTimer);
   lockedPose = null;
-  pendingConfirm = null;
   clearLayer();
-  setText(detectEl, 'Stopped. Press Ctrl+Shift+K to start.', 'muted');
-  setText(statusEl, '');
+  updateModeLabel();
+  setText(detectEl, 'Copy the jewel in-game (Ctrl+C), then press Ctrl+Shift+K.', 'muted');
+  setText(statusEl, message, kind);
   updateProgress();
 }
 
 // --- hotkeys (global, from Rust) ---
-listen('toggle-run', () => (active ? stop() : start()));
+listen('toggle-run', () => {
+  if (active) stopRecording('Recording stopped.');
+  else void startRecording();
+});
 listen('recalibrate', () => {
-  if (!active) return;
-  recordingPaused = false; // resume if a completed socket had paused the overlay
-  void calibrate();
+  if (active) void calibrate();
 });
-// Ctrl+Shift+N: the jewel was moved to a new socket. Unlock the socket and recalibrate so
-// it auto-identifies the new one fresh (normal recalibrate keeps the locked socket). The seed
-// is unchanged, so already-recorded nodes (incl. ones shared with the previous socket) stay
-// recorded and show as done.
-listen('next-socket', () => {
-  if (active) void newSocket();
-});
-async function newSocket(): Promise<void> {
-  recordingPaused = false;
-  socketChosen = false;
-  manualOverride = false;
-  pendingConfirm = null;
-  setText(statusEl, 'Moved jewel — detecting the new socket… (centre it and zoom so the gold frame is clear)', 'muted');
-  await calibrate();
-  resetTargetToFirstUnrecorded();
-  renderLocked();
-}
 listen<number>('socket-cycle', (e) => {
   if (!active) return;
   manualOverride = true;
   socketChosen = true; // lock to the user's pick
-  recordingPaused = false;
   selectSocket(socketIdx + (e.payload < 0 ? -1 : 1));
   renderLocked();
-  // Snap the pose to the socket you land on, debounced so rapid cycling only captures
-  // once (after you stop). Correcting a wrong auto-ID is then just "cycle to the right one".
+  // Snap the pose to the socket you land on, debounced so rapid cycling only captures once.
   if (cycleTimer) window.clearTimeout(cycleTimer);
   cycleTimer = window.setTimeout(() => void calibrate(), 350);
 });
-listen('capture-hotkey', () => void recordCurrent());
 
-// Ctrl+Shift+J: manual fallback. Accepts a pending borderline match if there is one,
-// otherwise force-reads the node currently under the cursor (e.g. to re-record or to
-// grab one before the auto dwell fires).
-async function recordCurrent(): Promise<void> {
-  if (!active || !lockedPose) return;
-  if (pendingConfirm) {
-    commitRecord(pendingConfirm.node, pendingConfirm.match);
-    pendingConfirm = null;
-    return;
-  }
-  if (!jewelInfo) {
-    setText(jewelEl, 'Read the jewel first (Ctrl+Shift+C) — recordings are keyed by seed.', 'warn');
-    return;
-  }
-  if (!lastHover) {
-    setText(statusEl, 'Hover the node you want to record (its tooltip should be showing).', 'warn');
-    return;
-  }
-  await recordNode(lastHover, true);
-}
-
-// OCR the tooltip near the cursor and record what the given node became. `manual` (the
-// keypress path) surfaces failures and bypasses the already-recorded guard; the auto
-// (hover) path stays quiet and reschedules a retry so a slightly-late tooltip still lands.
-async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
+// OCR the tooltip near the cursor and record what the hovered node became. Auto path only:
+// quiet on failure, and reschedules a dwell retry so a slightly-late tooltip still lands.
+async function recordNode(p: ProjectedNode): Promise<void> {
   if (!active || !lockedPose || !jewelInfo || ocrBusy) return;
   const node = p.notable;
-  if (isRecorded(node.skill) && !manual) return;
-  const key = recordKey(jewelInfo.seed, node.skill);
+  if (isCovered(node)) return;
   ocrBusy = true;
-  lastCaptureAt = Date.now(); // suppress the idle ring-watch while we're recording
-  // For a fresh node the hover render already shows only it (clean capture, no delay needed).
-  // Only when re-recording a "covered" node — which is drawn among all the others — do we need
-  // to hide them and wait for the webview to composite before the screen grab.
-  const dirty = isCovered(node);
-  if (dirty) {
-    captureOnly = node.skill;
-    renderLocked();
-    await new Promise((r) => setTimeout(r, 150));
-  }
   try {
     const dpr = window.devicePixelRatio || 1;
     const targetPhysical = { x: p.sx * dpr, y: p.sy * dpr };
@@ -728,34 +599,17 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
       h: OCR_BOX_H
     })) as OcrLine[];
     const m = matchNotable(lines, jewelVocab(), targetPhysical);
-    if (!m || m.confidence < CONFIRM) {
-      if (manual) {
-        setText(statusEl, `No confident match for ${node.name}. Make sure its tooltip is visible.`, 'warn');
-      } else if (autoTries < AUTO_MAX_TRIES) {
-        // Tooltip probably wasn't up yet — let the dwell retry this node shortly.
-        autoTriedSkill = null;
-        hoverStart = Date.now();
-      }
-      return;
-    }
-    if (m.confidence >= ACCEPT) {
+    if (m && m.confidence >= ACCEPT) {
       commitRecord(node, m);
-    } else {
-      pendingConfirm = { key, match: m, node };
-      setText(
-        statusEl,
-        `Matched “${m.name}” (${Math.round(m.confidence * 100)}%) on ${node.name} — Ctrl+Shift+J to accept.`,
-        'warn'
-      );
+    } else if (autoTries < AUTO_MAX_TRIES) {
+      // Tooltip probably wasn't up yet — let the dwell retry this node shortly.
+      autoTriedSkill = null;
+      hoverStart = Date.now();
     }
-  } catch (e) {
-    if (manual) setText(statusEl, `OCR error: ${e}`, 'warn');
+  } catch {
+    /* OCR failed this tick — ignore (the dwell may retry) */
   } finally {
     ocrBusy = false;
-    if (dirty) {
-      captureOnly = null;
-      renderLocked(); // restore the full highlight view (next hoverTick refines with hover)
-    }
   }
 }
 
@@ -789,43 +643,19 @@ function commitRecord(target: Notable, m: Match): void {
   }
 }
 
-// Every notable in the current socket is recorded: back up to the clipboard, then pause —
-// clear the highlights and stop auto-recording so the screen is clean until the jewel is
-// moved and Ctrl+Shift+N starts the next socket.
+// Every notable in this socket is captured: flush the last records to the DB, then finish —
+// stop recording and return to idle so you can move the jewel and start the next socket.
 async function completeSocket(): Promise<void> {
-  recordingPaused = true;
-  pendingConfirm = null;
-  clearLayer();
-  await exportRecords(); // clipboard backup (auto-sync to the DB already runs in the background)
-  setText(
-    statusEl,
-    `Socket ${socketIdx + 1}/${socketList.length} complete · ${recorded.size} recorded & exported. ` +
-      `Move the jewel to the next socket and press Ctrl+Shift+N.`,
+  await flushSync();
+  stopRecording(
+    'Jewel successfully recorded ✓ — move the jewel to the next socket and press Ctrl+Shift+K.',
     'ok'
   );
 }
 
-// Ctrl+Shift+E: copy all recorded transforms to the clipboard (submission-ready JSON).
-listen('export-records', () => void exportRecords());
-async function exportRecords(): Promise<void> {
-  if (recorded.size === 0) {
-    setText(statusEl, 'Nothing recorded yet — hover a transformed notable so its tooltip shows.', 'warn');
-    return;
-  }
-  const payload = [...recorded.values()];
-  try {
-    await invoke('export_records', { json: JSON.stringify(payload, null, 2) });
-    setText(statusEl, `Exported ${payload.length} transform(s) to clipboard.`, 'ok');
-  } catch (e) {
-    setText(statusEl, `Export error: ${e}`, 'warn');
-  }
-}
-
-// Jewel/seed capture from the clipboard. The seed is required for recording (the
-// same node transforms differently per seed). The user copies the jewel in-game with
-// Ctrl+C (a single natural action); we AUTO-POLL the clipboard so a new/swapped jewel
-// is picked up within ~1s with no second hotkey. Ctrl+Shift+C forces an immediate
-// read (and gives feedback when the clipboard isn't a jewel).
+// Jewel/seed capture from the clipboard. The seed is required for recording (the same node
+// transforms differently per seed). The user copies the jewel in-game with Ctrl+C; we read it
+// on Start and also AUTO-POLL so a swapped jewel is picked up within ~1s.
 async function readJewelFromClipboard(verbose: boolean): Promise<void> {
   try {
     const info = (await invoke('read_jewel')) as JewelInfo | null;
@@ -842,9 +672,7 @@ async function readJewelFromClipboard(verbose: boolean): Promise<void> {
     jewelInfo = info;
     setText(jewelEl, `Jewel: ${info.jewel} · seed ${info.seed}${conq}`, 'ok');
     // A new jewel/seed is a different recording set (records are keyed by seed). Keep the
-    // existing records — they accumulate across seeds for a single batch export — and just
-    // resume the walk at the first unrecorded notable for this seed.
-    pendingConfirm = null;
+    // existing records and just resume the walk at the first unrecorded notable for this seed.
     resetTargetToFirstUnrecorded();
     updateProgress();
     // Pull what the community already has for this seed (verified nodes get skipped).
@@ -853,8 +681,7 @@ async function readJewelFromClipboard(verbose: boolean): Promise<void> {
     if (verbose) setText(jewelEl, `clipboard error: ${e}`, 'warn');
   }
 }
-listen('read-jewel', () => void readJewelFromClipboard(true));
-// Auto-poll: pick up a copied/swapped jewel without needing the hotkey.
+// Auto-poll: pick up a copied/swapped jewel without needing a hotkey.
 setInterval(() => void readJewelFromClipboard(false), 1200);
 
 // Debug: Ctrl+Shift+S dumps a raw screen capture for mask tuning.
@@ -862,7 +689,7 @@ listen<string>('debug-capture', (e) => {
   setText(statusEl, `Saved: ${e.payload}`, e.payload.startsWith('ERROR') ? 'warn' : 'ok');
 });
 
-setText(detectEl, 'Stopped. Ctrl+Shift+K to start · Ctrl+Shift+R recalibrate · Ctrl+Shift+S dump frame.', 'muted');
+setText(detectEl, 'Copy the jewel in-game (Ctrl+C), then press Ctrl+Shift+K to start.', 'muted');
 
 // Restore any records from a previous run and start the background sync: retry pending
 // observations every few seconds (idempotent upserts), so a flaky network self-heals.

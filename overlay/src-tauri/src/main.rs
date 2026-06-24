@@ -743,21 +743,14 @@ fn main() {
     // compositing enabled. This is the standard remedy.
     std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu");
 
-    // Ctrl+Shift+J: record node + advance. Ctrl+Shift+K: show/hide overlay.
-    // Ctrl+Shift+R: (re)calibrate the pose. Ctrl+Shift+S: dump a debug screen capture.
-    let capture_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyJ);
+    // Ctrl+Shift+K: start / stop recording the jewel (reads the jewel + detects its socket on
+    // start). Ctrl+Shift+R: recalibrate the pose. Ctrl+Shift+[ ]: correct a wrong socket guess.
+    // Ctrl+Shift+S: dump a debug screen capture.
     let toggle_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyK);
     let recal_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR);
     let dump_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
-    // Manual socket cycling — auto-detect seeds the guess, these correct it.
     let prev_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::BracketLeft);
     let next_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::BracketRight);
-    // Ctrl+Shift+C: ingest the jewel's Ctrl+C item text (jewel type + seed).
-    let jewel_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyC);
-    // Ctrl+Shift+E: export recorded transforms to the clipboard.
-    let export_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
-    // Ctrl+Shift+N: moved the jewel to a new socket — re-identify it fresh.
-    let next_socket_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyN);
 
     tauri::Builder::default()
         .plugin(
@@ -766,9 +759,7 @@ fn main() {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-                    if sc == &capture_key {
-                        let _ = app.emit("capture-hotkey", ());
-                    } else if sc == &toggle_key {
+                    if sc == &toggle_key {
                         let _ = app.emit("toggle-run", ());
                     } else if sc == &recal_key {
                         let _ = app.emit("recalibrate", ());
@@ -785,12 +776,6 @@ fn main() {
                         let _ = app.emit("socket-cycle", -1i32);
                     } else if sc == &next_key {
                         let _ = app.emit("socket-cycle", 1i32);
-                    } else if sc == &jewel_key {
-                        let _ = app.emit("read-jewel", ());
-                    } else if sc == &export_key {
-                        let _ = app.emit("export-records", ());
-                    } else if sc == &next_socket_key {
-                        let _ = app.emit("next-socket", ());
                     }
                 })
                 .build(),
@@ -806,15 +791,11 @@ fn main() {
         ])
         .setup(move |app| {
             let gs = app.global_shortcut();
-            gs.register(capture_key)?;
             gs.register(toggle_key)?;
             gs.register(recal_key)?;
             gs.register(dump_key)?;
             gs.register(prev_key)?;
             gs.register(next_key)?;
-            gs.register(jewel_key)?;
-            gs.register(export_key)?;
-            gs.register(next_socket_key)?;
             if let Some(win) = app.get_webview_window("main") {
                 // Permanently click-through: the overlay never intercepts input, so
                 // it can't lock the screen or steal focus from the game. We do NOT
