@@ -149,6 +149,10 @@ const isRecorded = (skill: number): boolean =>
 // Loaded from the Worker when a jewel is read, so the overlay can show what others already
 // recorded and avoid redoing verified nodes.
 let dbConsensus = new Map<string, { confirmations: number; verified: boolean }>();
+// Track the fetch outcome so we never report "you're first" when we simply couldn't reach
+// the DB (e.g. offline, or the overlay is running a build without the fetch_consensus command).
+let dbState: 'idle' | 'loading' | 'loaded' | 'error' = 'idle';
+let dbError = '';
 const communityVerified = (n: Notable): boolean => dbConsensus.get(n.id)?.verified === true;
 const communityPartial = (n: Notable): boolean => {
   const c = dbConsensus.get(n.id);
@@ -158,6 +162,15 @@ const communityPartial = (n: Notable): boolean => {
 // has it verified (>=2). A single community confirmation is NOT covered — recording it adds
 // the 2nd vote that verifies it.
 const isCovered = (n: Notable): boolean => isRecorded(n.skill) || communityVerified(n);
+
+// Node name annotated with its community status, so it's clear at the point of recording
+// whether someone already captured it (and whether that capture is verified yet).
+function nodeLabel(n: Notable): string {
+  if (isRecorded(n.skill)) return `${n.name} · recorded by you`;
+  const c = dbConsensus.get(n.id);
+  if (!c) return n.name;
+  return c.verified ? `${n.name} · verified` : `${n.name} · recorded ×${c.confirmations}, needs verify`;
+}
 
 // --- contribution sync ---
 // Writes go to the Cloudflare Worker (which holds the DB credential); the overlay never
@@ -240,6 +253,8 @@ function updateSyncStatus(): void {
 // offline / not-found just leaves the map empty and recording proceeds as normal.
 async function loadConsensus(jewel: string, seed: number): Promise<void> {
   dbConsensus = new Map();
+  dbState = 'loading';
+  dbError = '';
   updateDbInfo();
   try {
     const raw = (await invoke('fetch_consensus', { workerUrl: WORKER_BASE, jewel, seed })) as string;
@@ -249,8 +264,11 @@ async function loadConsensus(jewel: string, seed: number): Promise<void> {
     for (const r of data.results ?? []) {
       dbConsensus.set(r.node_id, { confirmations: r.confirmations, verified: r.verified });
     }
-  } catch {
-    /* offline / endpoint down — proceed with no community data */
+    dbState = 'loaded';
+  } catch (e) {
+    // DO NOT fall back to "you're first" — that would be a lie. Surface the real failure.
+    dbState = 'error';
+    dbError = String(e);
   }
   updateDbInfo();
   resetTargetToFirstUnrecorded();
@@ -263,17 +281,30 @@ function updateDbInfo(): void {
     dbInfoEl.className = 'muted';
     return;
   }
+  if (dbState === 'loading') {
+    dbInfoEl.textContent = 'Checking community records…';
+    dbInfoEl.className = 'muted';
+    return;
+  }
+  if (dbState === 'error') {
+    dbInfoEl.textContent = `Community DB unreachable — ${dbError} (records still save & retry).`;
+    dbInfoEl.className = 'warn';
+    return;
+  }
   if (dbConsensus.size === 0) {
-    dbInfoEl.textContent = 'Community: no records for this seed yet — you’re first!';
+    dbInfoEl.textContent = 'Community: no records for this seed yet — you’re first.';
     dbInfoEl.className = 'community';
     return;
   }
   let verified = 0;
   for (const c of dbConsensus.values()) if (c.verified) verified++;
   const partial = dbConsensus.size - verified;
+  // Lead with the unverified count — with sparse testing that's the common, important case.
   dbInfoEl.textContent =
-    `Community (seed ${jewelInfo.seed}): ${verified} verified` +
-    `${partial ? `, ${partial} need 1 more` : ''} — verified are skipped.`;
+    partial > 0
+      ? `Community (seed ${jewelInfo.seed}): ${partial} recorded but UNVERIFIED (need a 2nd capture)` +
+        `${verified ? `, ${verified} verified` : ''}.`
+      : `Community (seed ${jewelInfo.seed}): all ${verified} verified.`;
   dbInfoEl.className = 'community';
 }
 
@@ -365,7 +396,7 @@ function draw(
   // capture is immediately visible.
   if (hover && !isCovered(hover.notable)) {
     circle(hover.sx, hover.sy, nodeR * 1.15, 'hover');
-    label(hover.sx + nodeR + 6, hover.sy + nodeR + 10, hover.notable.name, 'hoverLabel');
+    label(hover.sx + nodeR + 6, hover.sy + nodeR + 10, nodeLabel(hover.notable), 'hoverLabel');
     return;
   }
   projected.forEach((p, i) => {
@@ -381,7 +412,7 @@ function draw(
     else cls = 'node';
     circle(p.sx, p.sy, isTarget ? targetR : nodeR, cls);
   });
-  if (target) label(target.sx + targetR + 6, target.sy - targetR, `→ ${target.notable.name}`, 'targetLabel');
+  if (target) label(target.sx + targetR + 6, target.sy - targetR, `→ ${nodeLabel(target.notable)}`, 'targetLabel');
 }
 
 // Render the locked pose's notables (optionally with a cursor hover indicator). Cheap and
