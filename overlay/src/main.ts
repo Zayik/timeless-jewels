@@ -348,6 +348,19 @@ let captureOnly: number | null = null;
 let recordingPaused = false;
 let cycleTimer: number | undefined; // debounce the pose-refine after socket cycling
 
+// --- auto-detect a moved jewel ---
+// When idle (not actively recording) we periodically check whether the jewel's ring is still
+// there. The ring vanishes when you unsocket the jewel (panning/zooming never removes it), so a
+// sustained absence → reappearance means it was plugged into a new spot → auto re-detect the
+// socket. Only runs while idle so it adds no captures during recording (no lag).
+const WATCH_INTERVAL = 2000; // how often the idle ring-check fires
+const WATCH_IDLE_MS = 1500; // require this long since the last capture before checking
+const RING_ABSENT_THRESHOLD = 2; // consecutive absent checks (~4s) before "jewel removed"
+let watchTimer: number | undefined;
+let ringAbsentCount = 0;
+let jewelLifted = false; // ring has been absent long enough to count as removed
+let lastCaptureAt = 0; // timestamp of the last screen capture (recording or calibrate)
+
 function setText(el: Element, msg: string, kind: 'ok' | 'warn' | 'muted' = 'muted') {
   el.textContent = msg;
   el.className = kind === 'muted' ? 'muted' : kind;
@@ -475,6 +488,7 @@ function resetTargetToFirstUnrecorded() {
 async function calibrate(): Promise<void> {
   if (!active) return;
   setText(detectEl, 'Calibrating…', 'muted');
+  lastCaptureAt = Date.now(); // a capture is happening — keep the idle ring-watch quiet
   let det: Detection | null = null;
   try {
     det = (await invoke('capture_and_detect', {
@@ -535,6 +549,44 @@ async function hoverTick(): Promise<void> {
   if (active) hoverTimer = window.setTimeout(hoverTick, 120);
 }
 
+// Idle watch: while you're NOT actively recording, periodically check whether the jewel's
+// ring is still present. Unsocketing the jewel makes the ring vanish (pan/zoom never does), so
+// a sustained absence then reappearance means it was moved to a new socket → auto re-detect.
+// Skips entirely while recording (recent capture) so it never adds capture load there.
+async function watchTick(): Promise<void> {
+  if (!active) return;
+  const idle = Date.now() - lastCaptureAt > WATCH_IDLE_MS;
+  if (lockedPose && jewelInfo && !ocrBusy && !rendering && idle) {
+    try {
+      const det = (await invoke('capture_and_detect', {
+        jewel: jewelInfo.jewel,
+        socketHint: null,
+        identify: false // ring presence only — cheap, no socket scoring
+      })) as Detection | null;
+      lastCaptureAt = Date.now();
+      const present = !!det && det.jewel_match >= MATCH_FLOOR;
+      if (present && jewelLifted) {
+        // Removed then re-placed → treat as a new socket and re-identify it.
+        jewelLifted = false;
+        ringAbsentCount = 0;
+        setText(detectEl, 'New socket detected — calibrating…', 'muted');
+        await newSocket();
+      } else if (present) {
+        ringAbsentCount = 0;
+      } else {
+        ringAbsentCount++;
+        if (ringAbsentCount >= RING_ABSENT_THRESHOLD && !jewelLifted) {
+          jewelLifted = true;
+          setText(detectEl, 'Jewel removed — plug it into the next socket to auto-detect.', 'muted');
+        }
+      }
+    } catch {
+      /* capture failed this tick — ignore */
+    }
+  }
+  if (active) watchTimer = window.setTimeout(watchTick, WATCH_INTERVAL);
+}
+
 // Auto-record the node the cursor is resting on once its tooltip has had time to appear.
 // Tracks dwell per node so we OCR a node at most once per hover (re-hover to retry); the
 // OCR itself runs in recordNode, serialised by ocrBusy.
@@ -567,14 +619,18 @@ function start() {
   manualOverride = false;
   socketChosen = false;
   recordingPaused = false;
+  jewelLifted = false;
+  ringAbsentCount = 0;
   lockedPose = null;
   void calibrate();
   void hoverTick();
+  void watchTick();
 }
 function stop() {
   active = false;
   if (hoverTimer) window.clearTimeout(hoverTimer);
   if (cycleTimer) window.clearTimeout(cycleTimer);
+  if (watchTimer) window.clearTimeout(watchTimer);
   lockedPose = null;
   pendingConfirm = null;
   clearLayer();
@@ -651,6 +707,7 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
   if (isRecorded(node.skill) && !manual) return;
   const key = recordKey(jewelInfo.seed, node.skill);
   ocrBusy = true;
+  lastCaptureAt = Date.now(); // suppress the idle ring-watch while we're recording
   // For a fresh node the hover render already shows only it (clean capture, no delay needed).
   // Only when re-recording a "covered" node — which is drawn among all the others — do we need
   // to hide them and wait for the webview to composite before the screen grab.
