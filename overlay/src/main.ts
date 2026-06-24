@@ -6,12 +6,13 @@
 // Highlights are drawn from that pose and persist while you pan/zoom or a tooltip covers the
 // jewel; when they drift off the nodes you recalibrate. This is cheap (no per-frame capture)
 // and robust (occlusion/zoom can't break a held pose). All control is via global hotkeys:
-//   Ctrl+Shift+K = show/hide · Ctrl+Shift+R = recalibrate · Ctrl+Shift+J = record node + advance
-//   Ctrl+Shift+C = read jewel (seed) · Ctrl+Shift+E = export recorded transforms to clipboard
-// Recording reads the hovered node's tooltip via on-device OCR (Windows.Media.Ocr),
-// fuzzy-matches the result-notable name against the jewel's vocabulary, and stores the
-// transform {seed, socket, base node → result notable}. High-confidence matches record
-// automatically; borderline ones ask for a second Ctrl+Shift+J to confirm.
+//   Ctrl+Shift+K = show/hide · Ctrl+Shift+R = recalibrate · Ctrl+Shift+C = read jewel (seed)
+//   Ctrl+Shift+E = export recorded transforms to clipboard · Ctrl+Shift+J = force/confirm
+// Recording is hands-free: rest the cursor on a notable so its in-game tooltip appears and,
+// after a short dwell, the overlay OCRs it (Windows.Media.Ocr), fuzzy-matches the result
+// name against the jewel's vocabulary, and records the transform {seed, socket, base node →
+// result notable}. High-confidence matches record automatically; borderline ones wait for a
+// Ctrl+Shift+J to confirm. Ctrl+Shift+J also force-reads the hovered node on demand.
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -75,7 +76,7 @@ app.innerHTML = `
     <div id="status" class="muted"></div>
     <div id="progress" class="muted"></div>
     <div id="sync" class="muted"></div>
-    <div id="hint" class="muted"><b>Ctrl+Shift+K</b> show/hide · <b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+J</b> record &amp; next · <b>Ctrl+Shift+C</b> read jewel · <b>Ctrl+Shift+E</b> export</div>
+    <div id="hint" class="muted">Hover a node to auto-record · <b>Ctrl+Shift+K</b> show/hide · <b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+J</b> force/confirm · <b>Ctrl+Shift+C</b> read jewel · <b>Ctrl+Shift+E</b> export</div>
   </div>
   <svg id="layer"></svg>
 `;
@@ -219,9 +220,21 @@ const OCR_BOX_H = 1200;
 // Confidence tiers: auto-record at/above ACCEPT, ask to confirm down to CONFIRM, reject below.
 const ACCEPT = 0.92;
 const CONFIRM = 0.75;
-// A borderline match awaiting a second Ctrl+Shift+J to accept (keyed to its target node).
-let pendingConfirm: { key: string; match: Match } | null = null;
+// A borderline match awaiting a Ctrl+Shift+J to accept, with the node it was matched on.
+let pendingConfirm: { key: string; match: Match; node: Notable } | null = null;
 const jewelVocab = (): Vocab[] => (jewelInfo ? (vocab[jewelInfo.jewel] ?? []) : []);
+
+// --- hover auto-record ---
+// Resting the cursor on a notable (so its in-game tooltip is up) for DWELL_MS auto-OCRs and
+// records it — no keypress. Ctrl+Shift+J stays as a manual force / borderline-confirm.
+const DWELL_MS = 450; // hover this long before auto-reading (tooltip needs to be visible)
+let lastHover: ProjectedNode | null = null; // most recent hovered node (for the manual key)
+let hoverSkill: number | null = null; // skill currently under the cursor
+let hoverStart = 0; // when the cursor settled on hoverSkill (Date.now)
+let autoTriedSkill: number | null = null; // node already auto-attempted this dwell (don't spam)
+let autoTries = 0; // attempts on the current node — capped so a bad node can't loop OCR
+const AUTO_MAX_TRIES = 3;
+let ocrBusy = false; // an OCR pass (manual or auto) is in flight — serialise captures
 
 function setText(el: Element, msg: string, kind: 'ok' | 'warn' | 'muted' = 'muted') {
   el.textContent = msg;
@@ -277,28 +290,26 @@ function draw(
   const nodeR = Math.max(7, ringCss.r * NODE_RADIUS_FRAC);
   const targetR = nodeR * 1.25;
   const target = projected[targetIdx];
-  // When the cursor is on the chosen (target) node, its in-game tooltip is open — show
-  // ONLY that node's highlight so the other circles/labels don't overlap the tooltip.
-  const hoveringTarget = !!hover && !!target && hover.notable.skill === target.notable.skill;
+  // While hovering a node its in-game tooltip is open (and we're about to auto-record it) —
+  // show ONLY that node so the other circles/labels don't overlap the tooltip.
+  if (hover) {
+    const done = isRecorded(hover.notable.skill);
+    circle(hover.sx, hover.sy, nodeR * 1.15, done ? 'node done' : 'hover');
+    label(hover.sx + nodeR + 6, hover.sy + nodeR + 10, hover.notable.name, 'hoverLabel');
+    return;
+  }
   projected.forEach((p, i) => {
     const isTarget = i === targetIdx;
-    if (hoveringTarget && !isTarget) return;
-    const done = isRecorded(p.notable.skill);
-    const cls = isTarget ? 'node target' : done ? 'node done' : 'node';
+    const cls = isTarget ? 'node target' : isRecorded(p.notable.skill) ? 'node done' : 'node';
     circle(p.sx, p.sy, isTarget ? targetR : nodeR, cls);
   });
-  if (target && !hoveringTarget)
-    label(target.sx + targetR + 6, target.sy - targetR, `→ ${target.notable.name}`, 'targetLabel');
-  if (hover && !hoveringTarget) {
-    circle(hover.sx, hover.sy, nodeR * 1.15, 'hover');
-    label(hover.sx + nodeR + 6, hover.sy + nodeR + 10, hover.notable.name, 'hoverLabel');
-  }
+  if (target) label(target.sx + targetR + 6, target.sy - targetR, `→ ${target.notable.name}`, 'targetLabel');
 }
 
 // Render the locked pose's notables (optionally with a cursor hover indicator). Cheap and
 // pure: reads only the held pose + the chosen socket, no screen capture.
-function renderLocked(cursorPhysical?: { x: number; y: number }): void {
-  if (!lockedPose) return;
+function renderLocked(cursorPhysical?: { x: number; y: number }): ProjectedNode | null {
+  if (!lockedPose) return null;
   const dpr = window.devicePixelRatio || 1;
   const ring = { ...lockedPose, support: 0, frame_w: 0, frame_h: 0 };
   const projected = projectNotables(ring, socket(), data.rTree, dpr);
@@ -307,6 +318,7 @@ function renderLocked(cursorPhysical?: { x: number; y: number }): void {
     : null;
   draw(projected, ringInCss(ring, dpr), hover);
   updateProgress();
+  return hover;
 }
 
 function selectSocket(idx: number) {
@@ -380,7 +392,8 @@ async function hoverTick(): Promise<void> {
     rendering = true;
     try {
       const cur = (await invoke('get_cursor')) as { x: number; y: number };
-      renderLocked(cur);
+      lastHover = renderLocked(cur);
+      maybeAutoRecord(lastHover);
     } catch {
       /* cursor unavailable this tick */
     } finally {
@@ -388,6 +401,33 @@ async function hoverTick(): Promise<void> {
     }
   }
   if (active) hoverTimer = window.setTimeout(hoverTick, 120);
+}
+
+// Auto-record the node the cursor is resting on once its tooltip has had time to appear.
+// Tracks dwell per node so we OCR a node at most once per hover (re-hover to retry); the
+// OCR itself runs in recordNode, serialised by ocrBusy.
+function maybeAutoRecord(hover: ProjectedNode | null): void {
+  const skill = hover?.notable.skill ?? null;
+  if (skill !== hoverSkill) {
+    hoverSkill = skill;
+    hoverStart = Date.now();
+    autoTriedSkill = null;
+    autoTries = 0;
+    // Moving off the node abandons an unconfirmed borderline match.
+    if (pendingConfirm && (skill === null || pendingConfirm.node.skill !== skill)) {
+      pendingConfirm = null;
+    }
+  }
+  if (!hover || skill === null) return;
+  if (ocrBusy || autoTriedSkill === skill || isRecorded(skill)) return;
+  if (Date.now() - hoverStart < DWELL_MS) return;
+  autoTriedSkill = skill; // attempted this dwell — recordNode may reschedule a retry
+  autoTries++;
+  if (!jewelInfo) {
+    setText(jewelEl, 'Read the jewel first (Ctrl+Shift+C) — recordings are keyed by seed.', 'warn');
+    return;
+  }
+  void recordNode(hover, false);
 }
 
 function start() {
@@ -423,68 +463,71 @@ listen<number>('socket-cycle', (e) => {
 });
 listen('capture-hotkey', () => void recordCurrent());
 
-// Record what the current target node became: OCR the tooltip near the cursor, fuzzy-match
-// the result-notable name, then auto-record / ask to confirm / reject per the confidence
-// tiers. A second press on a borderline match accepts it.
+// Ctrl+Shift+J: manual fallback. Accepts a pending borderline match if there is one,
+// otherwise force-reads the node currently under the cursor (e.g. to re-record or to
+// grab one before the auto dwell fires).
 async function recordCurrent(): Promise<void> {
   if (!active || !lockedPose) return;
+  if (pendingConfirm) {
+    commitRecord(pendingConfirm.node, pendingConfirm.match);
+    pendingConfirm = null;
+    return;
+  }
   if (!jewelInfo) {
     setText(jewelEl, 'Read the jewel first (Ctrl+Shift+C) — recordings are keyed by seed.', 'warn');
     return;
   }
-  const s = socket();
-  const target = s.notables[targetIdx];
-  if (!target) {
-    setText(statusEl, `All notables recorded for this socket. Ctrl+Shift+E to export.`, 'ok');
+  if (!lastHover) {
+    setText(statusEl, 'Hover the node you want to record (its tooltip should be showing).', 'warn');
     return;
   }
-  const key = recordKey(jewelInfo.seed, s.socketId, target.skill);
+  await recordNode(lastHover, true);
+}
 
-  // Second press on the same borderline target accepts the stashed match.
-  if (pendingConfirm && pendingConfirm.key === key) {
-    commitRecord(target, pendingConfirm.match);
-    pendingConfirm = null;
-    return;
-  }
-  pendingConfirm = null;
-
-  // Project the target node to physical px so the OCR line nearest it wins ties.
-  const dpr = window.devicePixelRatio || 1;
-  const ring = { ...lockedPose, support: 0, frame_w: 0, frame_h: 0 };
-  const projected = projectNotables(ring, s, data.rTree, dpr);
-  const tp = projected[targetIdx];
-  const targetPhysical = { x: tp.sx * dpr, y: tp.sy * dpr };
-
-  setText(statusEl, `Reading tooltip for ${target.name}…`, 'muted');
-  let lines: OcrLine[];
+// OCR the tooltip near the cursor and record what the given node became. `manual` (the
+// keypress path) surfaces failures and bypasses the already-recorded guard; the auto
+// (hover) path stays quiet and reschedules a retry so a slightly-late tooltip still lands.
+async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
+  if (!active || !lockedPose || !jewelInfo || ocrBusy) return;
+  const node = p.notable;
+  if (isRecorded(node.skill) && !manual) return;
+  const key = recordKey(jewelInfo.seed, socket().socketId, node.skill);
+  ocrBusy = true;
   try {
+    const dpr = window.devicePixelRatio || 1;
+    const targetPhysical = { x: p.sx * dpr, y: p.sy * dpr };
     const cur = (await invoke('get_cursor')) as { x: number; y: number };
-    lines = (await invoke('ocr_region', {
+    const lines = (await invoke('ocr_region', {
       cx: cur.x,
       cy: cur.y,
       w: OCR_BOX_W,
       h: OCR_BOX_H
     })) as OcrLine[];
+    const m = matchNotable(lines, jewelVocab(), targetPhysical);
+    if (!m || m.confidence < CONFIRM) {
+      if (manual) {
+        setText(statusEl, `No confident match for ${node.name}. Make sure its tooltip is visible.`, 'warn');
+      } else if (autoTries < AUTO_MAX_TRIES) {
+        // Tooltip probably wasn't up yet — let the dwell retry this node shortly.
+        autoTriedSkill = null;
+        hoverStart = Date.now();
+      }
+      return;
+    }
+    if (m.confidence >= ACCEPT) {
+      commitRecord(node, m);
+    } else {
+      pendingConfirm = { key, match: m, node };
+      setText(
+        statusEl,
+        `Matched “${m.name}” (${Math.round(m.confidence * 100)}%) on ${node.name} — Ctrl+Shift+J to accept.`,
+        'warn'
+      );
+    }
   } catch (e) {
-    setText(statusEl, `OCR error: ${e}`, 'warn');
-    return;
-  }
-
-  const m = matchNotable(lines, jewelVocab(), targetPhysical);
-  if (!m || m.confidence < CONFIRM) {
-    setText(
-      statusEl,
-      `No confident match for ${target.name}. Hover the node so its tooltip shows, then Ctrl+Shift+J.`,
-      'warn'
-    );
-    return;
-  }
-  const pct = Math.round(m.confidence * 100);
-  if (m.confidence >= ACCEPT) {
-    commitRecord(target, m);
-  } else {
-    pendingConfirm = { key, match: m };
-    setText(statusEl, `Matched “${m.name}” (${pct}%) — press Ctrl+Shift+J again to accept.`, 'warn');
+    if (manual) setText(statusEl, `OCR error: ${e}`, 'warn');
+  } finally {
+    ocrBusy = false;
   }
 }
 
@@ -521,7 +564,7 @@ function commitRecord(target: Notable, m: Match): void {
 listen('export-records', () => void exportRecords());
 async function exportRecords(): Promise<void> {
   if (recorded.size === 0) {
-    setText(statusEl, 'Nothing recorded yet — hover a transformed notable and press Ctrl+Shift+J.', 'warn');
+    setText(statusEl, 'Nothing recorded yet — hover a transformed notable so its tooltip shows.', 'warn');
     return;
   }
   const payload = [...recorded.values()];
