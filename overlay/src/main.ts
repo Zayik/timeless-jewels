@@ -76,7 +76,7 @@ app.innerHTML = `
     <div id="status" class="muted"></div>
     <div id="progress" class="muted"></div>
     <div id="sync" class="muted"></div>
-    <div id="hint" class="muted">Hover a node to auto-record · <b>Ctrl+Shift+K</b> show/hide · <b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+J</b> force/confirm · <b>Ctrl+Shift+C</b> read jewel · <b>Ctrl+Shift+E</b> export</div>
+    <div id="hint" class="muted">Hover a node to auto-record · <b>Ctrl+Shift+N</b> new socket · <b>Ctrl+Shift+K</b> show/hide · <b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+J</b> force/confirm · <b>Ctrl+Shift+C</b> read jewel · <b>Ctrl+Shift+E</b> export</div>
   </div>
   <svg id="layer"></svg>
 `;
@@ -136,10 +136,12 @@ interface RecordedTransform {
   synced: boolean;
 }
 const recorded = new Map<string, RecordedTransform>();
-const recordKey = (seed: number, socketId: number, skill: number): string =>
-  `${seed}:${socketId}:${skill}`;
+// Keyed by (seed, node) — NOT socket: a timeless jewel's transform for a node depends only
+// on the seed, so a node shared by overlapping sockets is recorded once and shows as done in
+// every socket (matches the DB's seed+node uniqueness). source_socket is kept as metadata.
+const recordKey = (seed: number, skill: number): string => `${seed}:${skill}`;
 const isRecorded = (skill: number): boolean =>
-  !!jewelInfo && recorded.has(recordKey(jewelInfo.seed, socket().socketId, skill));
+  !!jewelInfo && recorded.has(recordKey(jewelInfo.seed, skill));
 
 // --- contribution sync ---
 // Writes go to the Cloudflare Worker (which holds the DB credential); the overlay never
@@ -166,7 +168,11 @@ function loadRecords(): void {
   try {
     const raw = localStorage.getItem(RECORDS_KEY);
     if (!raw) return;
-    for (const [k, v] of JSON.parse(raw) as [string, RecordedTransform][]) recorded.set(k, v);
+    // Re-key under the current scheme (recordKey from the stored value) so records saved
+    // under an older key format still load and dedupe correctly.
+    for (const [, v] of JSON.parse(raw) as [string, RecordedTransform][]) {
+      recorded.set(recordKey(v.seed, v.baseSkill), v);
+    }
   } catch {
     /* corrupt store — start fresh */
   }
@@ -454,6 +460,22 @@ listen('toggle-run', () => (active ? stop() : start()));
 listen('recalibrate', () => {
   if (active) void calibrate();
 });
+// Ctrl+Shift+N: the jewel was moved to a new socket. Unlock the socket and recalibrate so
+// it auto-identifies the new one fresh (normal recalibrate keeps the locked socket). The seed
+// is unchanged, so already-recorded nodes (incl. ones shared with the previous socket) stay
+// recorded and show as done.
+listen('next-socket', () => {
+  if (active) void newSocket();
+});
+async function newSocket(): Promise<void> {
+  socketChosen = false;
+  manualOverride = false;
+  pendingConfirm = null;
+  setText(statusEl, 'Moved jewel — detecting the new socket… (centre it and zoom so the gold frame is clear)', 'muted');
+  await calibrate();
+  resetTargetToFirstUnrecorded();
+  renderLocked();
+}
 listen<number>('socket-cycle', (e) => {
   if (!active) return;
   manualOverride = true;
@@ -491,7 +513,7 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
   if (!active || !lockedPose || !jewelInfo || ocrBusy) return;
   const node = p.notable;
   if (isRecorded(node.skill) && !manual) return;
-  const key = recordKey(jewelInfo.seed, socket().socketId, node.skill);
+  const key = recordKey(jewelInfo.seed, node.skill);
   ocrBusy = true;
   try {
     const dpr = window.devicePixelRatio || 1;
@@ -534,7 +556,7 @@ async function recordNode(p: ProjectedNode, manual: boolean): Promise<void> {
 function commitRecord(target: Notable, m: Match): void {
   if (!jewelInfo) return;
   const s = socket();
-  recorded.set(recordKey(jewelInfo.seed, s.socketId, target.skill), {
+  recorded.set(recordKey(jewelInfo.seed, target.skill), {
     jewel: jewelInfo.jewel,
     conqueror: jewelInfo.conqueror,
     seed: jewelInfo.seed,
@@ -553,8 +575,12 @@ function commitRecord(target: Notable, m: Match): void {
   let next = targetIdx + 1;
   while (next < s.notables.length && isRecorded(s.notables[next].skill)) next++;
   targetIdx = next;
-  if (targetIdx >= s.notables.length) {
-    setText(statusEl, `All ${s.notables.length} notables recorded. Ctrl+Shift+E to export.`, 'ok');
+  if (recordedHere() >= s.notables.length) {
+    setText(
+      statusEl,
+      `Socket ${socketIdx + 1}/${socketList.length} complete — move the jewel to the next socket and press Ctrl+Shift+N.`,
+      'ok'
+    );
   }
   void flushSync();
   renderLocked();

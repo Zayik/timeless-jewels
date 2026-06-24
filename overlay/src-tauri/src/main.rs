@@ -736,6 +736,8 @@ fn main() {
     let jewel_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyC);
     // Ctrl+Shift+E: export recorded transforms to the clipboard.
     let export_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
+    // Ctrl+Shift+N: moved the jewel to a new socket — re-identify it fresh.
+    let next_socket_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyN);
 
     tauri::Builder::default()
         .plugin(
@@ -767,6 +769,8 @@ fn main() {
                         let _ = app.emit("read-jewel", ());
                     } else if sc == &export_key {
                         let _ = app.emit("export-records", ());
+                    } else if sc == &next_socket_key {
+                        let _ = app.emit("next-socket", ());
                     }
                 })
                 .build(),
@@ -789,6 +793,7 @@ fn main() {
             gs.register(next_key)?;
             gs.register(jewel_key)?;
             gs.register(export_key)?;
+            gs.register(next_socket_key)?;
             if let Some(win) = app.get_webview_window("main") {
                 // Permanently click-through: the overlay never intercepts input, so
                 // it can't lock the screen or steal focus from the game. We do NOT
