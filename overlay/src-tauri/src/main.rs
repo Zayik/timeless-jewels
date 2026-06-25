@@ -103,10 +103,18 @@ struct JewelInfo {
 /// The seed is the integer immediately followed by its "(min-max)" range, e.g.
 /// `Remembrancing 7704(100-8000) ...`. Scanning for that pattern is robust across
 /// both jewels regardless of the surrounding flavour wording.
+///
+/// With PoE's "Advanced Mod Descriptions" enabled, enchant/implicit rolls ALSO copy
+/// with a parenthetical range — e.g. `+6(4-8) to Intelligence` — and such a line can
+/// sit above the seed line. So we collect every `number(min-max)` candidate and keep
+/// the one whose range span (`max - min`) is widest: a timeless-jewel seed range spans
+/// thousands (100-8000, 79-30977) while a stat roll spans single digits, so the seed
+/// always wins without hardcoding any per-jewel range.
 fn find_seed(text: &str) -> Option<u32> {
     let b = text.as_bytes();
     let n = b.len();
     let mut i = 0;
+    let mut best: Option<(u32, u32)> = None; // (seed, range span)
     while i < n {
         if !b[i].is_ascii_digit() {
             i += 1;
@@ -116,7 +124,7 @@ fn find_seed(text: &str) -> Option<u32> {
         while i < n && b[i].is_ascii_digit() {
             i += 1;
         }
-        // Require "(digits-digits)" immediately after the number.
+        // Require "(min-max)" immediately after the number.
         if i < n && b[i] == b'(' {
             let mut j = i + 1;
             let ds = j;
@@ -124,18 +132,26 @@ fn find_seed(text: &str) -> Option<u32> {
                 j += 1;
             }
             if j > ds && j < n && b[j] == b'-' {
+                let min: Option<u32> = text[ds..j].parse().ok();
                 j += 1;
                 let es = j;
                 while j < n && b[j].is_ascii_digit() {
                     j += 1;
                 }
                 if j > es && j < n && b[j] == b')' {
-                    return text[start..i].parse().ok();
+                    if let (Some(seed), Some(min), Some(max)) =
+                        (text[start..i].parse::<u32>().ok(), min, text[es..j].parse::<u32>().ok())
+                    {
+                        let span = max.saturating_sub(min);
+                        if best.map_or(true, |(_, b_span)| span > b_span) {
+                            best = Some((seed, span));
+                        }
+                    }
                 }
             }
         }
     }
-    None
+    best.map(|(seed, _)| seed)
 }
 
 /// The selected conqueror from "...by the line of <Name>(<all variants>)".
@@ -575,6 +591,18 @@ mod tests {
     #[test]
     fn rejects_non_jewel_text() {
         assert!(parse_jewel("just some clipboard text 1234(5-6)").is_none());
+    }
+
+    #[test]
+    fn seed_wins_over_enchant_range_with_advanced_mod_descriptions() {
+        // "Advanced Mod Descriptions" makes the enchant copy with its own roll range
+        // (`+6(4-8) to Intelligence`) ABOVE the seed line. The widest range must win so
+        // the seed (range spans thousands) beats the enchant (range spans single digits).
+        let text = "Item Class: Jewels\r\nRarity: Unique\r\nUndying Hate\r\nTimeless Jewel\r\n--------\r\nLimited to: 1 Historic\r\nRadius: Very Large\r\n--------\r\n+6(4-8) to Intelligence\r\n--------\r\n{ Unique Modifier }\r\nHistoric — Unscalable Value\r\nGlorifying the defilement of 17050(79-30977) souls in tribute to Kulemak by the line of Kurgal(Amanamu-Kulemak)\r\n";
+        let j = parse_jewel(text).expect("should parse");
+        assert_eq!(j.jewel, "Undying Hate");
+        assert_eq!(j.seed, 17050);
+        assert_eq!(j.conqueror, "Kurgal");
     }
 
     #[test]
