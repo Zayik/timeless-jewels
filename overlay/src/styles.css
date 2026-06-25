@@ -59,6 +59,9 @@ body {
 #mode.recording {
   background: var(--warn);
 }
+#mode.arming {
+  background: #6fb6ff;
+}
 #mode .key {
   font-size: 11px;
   font-weight: 600;
@@ -193,4 +196,16 @@ body {
 #layer .hoverLabel {
   fill: #ff44dd;
   font-size: 13px;
+}
+/* Arming cue: marker + prompt on the jewel itself. Mask-safe orange (see the .node.target
+   note) so it can't bias a re-detect. */
+#layer .copyMarker {
+  fill: rgba(255, 119, 51, 0.25);
+  stroke: #ff7733;
+  stroke-width: 3;
+}
+#layer .copyLabel {
+  fill: #ff7733;
+  font-size: 13px;
+  font-weight: 700;
 }

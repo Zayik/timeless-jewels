@@ -59,6 +59,9 @@ interface Detection {
   socket_id: number;
   socket_score: number;
   socket_second: number;
+  /** Colour ring missing but the white hover-highlight ring is present — the jewel is being
+   * hovered (tooltip up). Move the cursor off it and re-detect. */
+  hovered: boolean;
 }
 
 // Minimum match correlation to trust a frame. Below this the socketed graphic isn't at the
@@ -93,10 +96,16 @@ const progressEl = document.getElementById('progress')!;
 const syncEl = document.getElementById('sync')!;
 const layer = document.getElementById('layer') as unknown as SVGSVGElement;
 function updateModeLabel(): void {
-  modeEl.innerHTML = active
-    ? '■ Stop recording jewel <span class="key">Ctrl+Shift+K</span>'
-    : '▶ Start recording jewel <span class="key">Ctrl+Shift+K</span>';
-  modeEl.className = active ? 'mode recording' : 'mode';
+  if (active) {
+    modeEl.innerHTML = '■ Stop recording jewel <span class="key">Ctrl+Shift+K</span>';
+    modeEl.className = 'mode recording';
+  } else if (arming) {
+    modeEl.innerHTML = '… Waiting for jewel — Ctrl+C it <span class="key">Ctrl+Shift+K</span> to cancel';
+    modeEl.className = 'mode arming';
+  } else {
+    modeEl.innerHTML = '▶ Start recording jewel <span class="key">Ctrl+Shift+K</span>';
+    modeEl.className = 'mode';
+  }
 }
 
 // --- state ---
@@ -105,7 +114,14 @@ function updateModeLabel(): void {
 // a fixed screen pose; highlights are drawn from that pose and persist while you pan/zoom or a
 // tooltip covers the jewel. When the view has moved enough that highlights drift off the nodes,
 // you recalibrate. A cheap cursor-only poll (no capture) keeps the hover indicator live.
-let active = false; // overlay shown (between Ctrl+Shift+K on/off)
+let active = false; // recording in progress (seed locked, hover auto-records)
+// Arming handshake: Ctrl+Shift+K from idle enters this state and waits for the user to
+// deliberately Ctrl+C the jewel before recording starts, so the active seed is always one
+// the user just picked — never whatever happened to be on the clipboard.
+let arming = false;
+let armSeq = 0; // clipboard sequence number snapshotted when arming began
+let armTimer: number | undefined; // poll that watches for the deliberate copy
+let redetectTimer: number | undefined; // retries socket detection while arming until it locks
 let hoverTimer: number | undefined;
 let rendering = false; // re-entrancy guard for the cursor-poll render
 let socketIdx = 0; // index into socketList (current socket being projected)
@@ -513,7 +529,7 @@ function resetTargetToFirstUnrecorded() {
 // and snap the pose to the tree. Locks `lockedPose`. On failure the previous pose is kept so a
 // bad calibrate (tooltip over the jewel, too zoomed) never wipes a working overlay.
 async function calibrate(): Promise<void> {
-  if (!active) return;
+  if (!active && !arming) return;
   setText(detectEl, 'Detecting the jewel socket…', 'muted');
   let det: Detection | null = null;
   try {
@@ -528,12 +544,22 @@ async function calibrate(): Promise<void> {
     setText(detectEl, `capture error: ${e}`, 'warn');
     return;
   }
+  if (det?.hovered) {
+    // White ring instead of the colour one: the jewel's tooltip is up, hiding the colour the
+    // mask needs. Ask the user to move off it and auto-retry — no Ctrl+Shift+R dance.
+    setText(detectEl, "You're hovering the jewel — move the cursor off it to detect the socket.", 'warn');
+    setText(statusEl, 'Re-detecting automatically…', 'muted');
+    drawHoverOffCue(det);
+    if (arming) scheduleRedetect();
+    return; // keep any existing lockedPose
+  }
   if (!det || det.jewel_match < MATCH_FLOOR) {
     setText(
       detectEl,
       'Could not find the socket. Centre it, zoom so the gold socket frame is clear, move any tooltip off it, then recalibrate (Ctrl+Shift+R).',
       'warn'
     );
+    if (arming) scheduleRedetect(); // self-heal once the view/zoom is fixed
     return; // keep any existing lockedPose
   }
   lockedPose = { cx: det.cx, cy: det.cy, r: det.r };
@@ -547,6 +573,14 @@ async function calibrate(): Promise<void> {
   const sock = socketChosen
     ? ` · socket ${socketIdx + 1}/${socketList.length}`
     : ' · socket unsure (cycle with Ctrl+Shift+[ ])';
+  if (arming) {
+    // Detected on a clean screen — now point the user at the jewel to copy it. No notable
+    // overlay yet (the seed isn't known until the copy), just a cue on the jewel itself.
+    setText(detectEl, `Socket locked${sock} — now hover the jewel and press Ctrl+C.`, 'ok');
+    setText(statusEl, 'Copy the jewel (Ctrl+C) to capture its seed. Ctrl+Shift+R to re-detect.', 'muted');
+    drawCopyCue();
+    return;
+  }
   setText(detectEl, `Locked: ${det.jewel} · ${(det.jewel_match * 100) | 0}%${sock}`, 'ok');
   setText(
     statusEl,
@@ -554,6 +588,47 @@ async function calibrate(): Promise<void> {
     'muted'
   );
   renderLocked();
+}
+
+// Arming visual: the detected ring, a small dot on the jewel, and a compact arrow-label beside
+// it pointing at the jewel — not a banner over the radius. Mask-safe orange (see the
+// .node.target note) so re-detecting with the cue on screen can't bias the ring fit.
+function drawCopyCue(): void {
+  if (!lockedPose) return;
+  const dpr = window.devicePixelRatio || 1;
+  const ring = { ...lockedPose, support: 0, frame_w: 0, frame_h: 0 };
+  const css = ringInCss(ring, dpr);
+  clearLayer();
+  circle(css.cx, css.cy, css.r, 'ring');
+  circle(css.cx, css.cy, 6, 'copyMarker'); // small dot marking the jewel itself
+  // Label sits just to the right of the jewel; the leading arrow points back at it.
+  label(css.cx + 14, css.cy + 4, '← Ctrl+C on jewel', 'copyLabel');
+}
+
+// Same compact style as the copy cue, but for the hovered state: a marker on the jewel (located
+// via the white ring) and a "move off" prompt. Drawn from the white-ring pose, not lockedPose.
+function drawHoverOffCue(det: Detection): void {
+  const dpr = window.devicePixelRatio || 1;
+  const css = ringInCss({ cx: det.cx, cy: det.cy, r: det.r, support: 0, frame_w: 0, frame_h: 0 }, dpr);
+  clearLayer();
+  circle(css.cx, css.cy, css.r, 'ring');
+  circle(css.cx, css.cy, 6, 'copyMarker');
+  label(css.cx + 14, css.cy + 4, '← move cursor off jewel', 'copyLabel');
+}
+
+// While arming, retry socket detection until it locks (e.g. once the user moves off the jewel,
+// or re-centres the tree). Single pending timer; calibrate reschedules if it still fails.
+const REDETECT_MS = 800;
+function scheduleRedetect(): void {
+  if (redetectTimer || !arming) return;
+  redetectTimer = window.setTimeout(() => {
+    redetectTimer = undefined;
+    if (arming && !lockedPose) void calibrate();
+  }, REDETECT_MS);
+}
+function clearRedetect(): void {
+  if (redetectTimer) window.clearTimeout(redetectTimer);
+  redetectTimer = undefined;
 }
 
 // Cheap cursor-only poll (NO screen capture) so the hover indicator follows the mouse while
@@ -594,21 +669,93 @@ function maybeAutoRecord(hover: ProjectedNode | null): void {
   void recordNode(hover);
 }
 
-// Ctrl+Shift+K (idle): start recording. Reads the jewel from the clipboard for the seed, then
-// detects the socket it's plugged into and begins. Pressing K while recording stops.
-async function startRecording(): Promise<void> {
-  await readJewelFromClipboard(false); // pick up the jewel/seed from the clipboard
-  if (!jewelInfo) {
-    setText(detectEl, 'No jewel on the clipboard — copy it in-game (Ctrl+C), then press Ctrl+Shift+K.', 'warn');
+const ARM_POLL_MS = 300; // how often the arming poll checks for the deliberate Ctrl+C
+const IDLE_PROMPT = 'Press Ctrl+Shift+K, then hover the jewel in-game and press Ctrl+C.';
+
+// Ctrl+Shift+K (idle): ARM. Snapshot the clipboard's change counter and wait for the user to
+// deliberately Ctrl+C the jewel — only THEN do we read the seed. This guarantees the recorded
+// seed is the one the user just picked, never a stale jewel left on the clipboard. Recording
+// does not start until a valid jewel is copied (see armTick → startActiveRecording).
+async function beginArming(): Promise<void> {
+  try {
+    armSeq = (await invoke('clipboard_seq')) as number;
+  } catch (e) {
+    setText(detectEl, `clipboard error: ${e}`, 'warn');
     return; // stay idle
   }
-  active = true;
+  arming = true;
+  // Fresh detection: forget any previous jewel/socket so calibrate detects the ring (either
+  // colour) on the clean screen and auto-identifies the socket.
+  jewelInfo = null;
   manualOverride = false;
-  socketChosen = false; // fresh socket detection each start — this is how a moved jewel is handled
+  socketChosen = false;
   lockedPose = null;
   hoverSkill = null;
+  clearLayer();
   updateModeLabel();
-  void calibrate();
+  // Detect the socket NOW, while no tooltip is up — the ring/tree are unoccluded. calibrate
+  // (arming branch) draws the "Ctrl+C the jewel" cue on success.
+  await calibrate();
+  // Then wait for the deliberate copy. armSeq was snapshotted before calibrate, so a copy made
+  // during detection is still caught on the first poll tick.
+  if (armTimer) window.clearInterval(armTimer);
+  armTimer = window.setInterval(() => void armTick(), ARM_POLL_MS);
+}
+
+// While arming: detect the deliberate copy via the clipboard change counter (bumps even when
+// the re-copied text is identical), then parse it. A valid jewel locks the seed and starts
+// recording; anything else leaves a hint and keeps waiting.
+async function armTick(): Promise<void> {
+  if (!arming) return;
+  // Don't accept a copy until the socket is locked — otherwise a record could bind to an
+  // unknown socket. (Copying requires hovering the jewel, which whitens the ring, so detection
+  // must finish first.) Keep retrying detection until it locks; the copy is read once it does.
+  if (!lockedPose) {
+    scheduleRedetect();
+    return;
+  }
+  let seq: number;
+  try {
+    seq = (await invoke('clipboard_seq')) as number;
+  } catch {
+    return; // transient — try again next tick
+  }
+  if (seq === armSeq) return; // nothing copied yet
+  armSeq = seq; // consume this change whether or not it's a jewel
+  const info = (await invoke('read_jewel').catch(() => null)) as JewelInfo | null;
+  if (!info) {
+    setText(detectEl, "That copy wasn't a timeless jewel — hover the jewel and press Ctrl+C.", 'warn');
+    return; // keep waiting
+  }
+  bindJewel(info);
+  startActiveRecording();
+}
+
+function cancelArming(message: string): void {
+  arming = false;
+  if (armTimer) window.clearInterval(armTimer);
+  armTimer = undefined;
+  clearRedetect();
+  clearLayer(); // remove the copy cue
+  updateModeLabel();
+  setText(detectEl, IDLE_PROMPT, 'muted');
+  setText(statusEl, message, 'muted');
+}
+
+// Seed is bound — start recording. The socket was already detected during arming on a clean
+// screen, so reuse that pose and just reveal the notable overlay; only fall back to a fresh
+// detect if arming-time detection failed. The clipboard is no longer read while active, so the
+// seed cannot change under us.
+function startActiveRecording(): void {
+  arming = false;
+  if (armTimer) window.clearInterval(armTimer);
+  armTimer = undefined;
+  clearRedetect();
+  active = true;
+  hoverSkill = null;
+  updateModeLabel();
+  if (lockedPose) renderLocked();
+  else void calibrate(); // detection failed while arming — retry now
   void hoverTick();
 }
 
@@ -619,7 +766,7 @@ function stopRecording(message: string, kind: 'ok' | 'muted' = 'muted'): void {
   lockedPose = null;
   clearLayer();
   updateModeLabel();
-  setText(detectEl, 'Copy the jewel in-game (Ctrl+C), then press Ctrl+Shift+K.', 'muted');
+  setText(detectEl, IDLE_PROMPT, 'muted');
   setText(statusEl, message, kind);
   updateProgress();
 }
@@ -627,10 +774,11 @@ function stopRecording(message: string, kind: 'ok' | 'muted' = 'muted'): void {
 // --- hotkeys (global, from Rust) ---
 listen('toggle-run', () => {
   if (active) stopRecording('Recording stopped.');
-  else void startRecording();
+  else if (arming) cancelArming('Cancelled.');
+  else void beginArming();
 });
 listen('recalibrate', () => {
-  if (active) void calibrate();
+  if (active || arming) void calibrate();
 });
 listen<number>('socket-cycle', (e) => {
   if (!active) return;
@@ -715,43 +863,26 @@ async function completeSocket(): Promise<void> {
   );
 }
 
-// Jewel/seed capture from the clipboard. The seed is required for recording (the same node
-// transforms differently per seed). The user copies the jewel in-game with Ctrl+C; we read it
-// on Start and also AUTO-POLL so a swapped jewel is picked up within ~1s.
-async function readJewelFromClipboard(verbose: boolean): Promise<void> {
-  try {
-    const info = (await invoke('read_jewel')) as JewelInfo | null;
-    if (!info) {
-      if (verbose)
-        setText(jewelEl, 'No timeless jewel on clipboard — hover it and press Ctrl+C first.', 'warn');
-      return;
-    }
-    const conq = info.conqueror ? ` · ${info.conqueror}` : '';
-    if (jewelInfo && info.jewel === jewelInfo.jewel && info.seed === jewelInfo.seed) {
-      if (verbose) setText(jewelEl, `Jewel: ${info.jewel} · seed ${info.seed}${conq} (unchanged)`, 'ok');
-      return;
-    }
-    jewelInfo = info;
-    setText(jewelEl, `Jewel: ${info.jewel} · seed ${info.seed}${conq}`, 'ok');
-    // A new jewel/seed is a different recording set (records are keyed by seed). Keep the
-    // existing records and just resume the walk at the first unrecorded notable for this seed.
-    resetTargetToFirstUnrecorded();
-    updateProgress();
-    // Pull what the community already has for this seed (verified nodes get skipped).
-    void loadConsensus(info.jewel, info.seed);
-  } catch (e) {
-    if (verbose) setText(jewelEl, `clipboard error: ${e}`, 'warn');
-  }
+// Lock a freshly-copied jewel as the active seed for the recording session. Called only from
+// the arming handshake after a deliberate Ctrl+C — never from a background poll — so the seed
+// is always one the user just picked. The seed is required because the same node transforms
+// differently per seed; records are keyed by seed (recordKey).
+function bindJewel(info: JewelInfo): void {
+  jewelInfo = info;
+  const conq = info.conqueror ? ` · ${info.conqueror}` : '';
+  setText(jewelEl, `Jewel: ${info.jewel} · seed ${info.seed}${conq}`, 'ok');
+  resetTargetToFirstUnrecorded();
+  updateProgress();
+  // Pull what the community already has for this seed (verified nodes get skipped).
+  void loadConsensus(info.jewel, info.seed);
 }
-// Auto-poll: pick up a copied/swapped jewel without needing a hotkey.
-setInterval(() => void readJewelFromClipboard(false), 1200);
 
 // Debug: Ctrl+Shift+S dumps a raw screen capture for mask tuning.
 listen<string>('debug-capture', (e) => {
   setText(statusEl, `Saved: ${e.payload}`, e.payload.startsWith('ERROR') ? 'warn' : 'ok');
 });
 
-setText(detectEl, 'Copy the jewel in-game (Ctrl+C), then press Ctrl+Shift+K to start.', 'muted');
+setText(detectEl, IDLE_PROMPT, 'muted');
 
 // Restore any records from a previous run and start the background sync: retry pending
 // observations every few seconds (idempotent upserts), so a flaky network self-heals.

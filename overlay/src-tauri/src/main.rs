@@ -81,6 +81,10 @@ struct Detection {
     socket_score: f64,
     /// Chamfer cost of the runner-up — the gap is the confidence in socket_id.
     socket_second: f64,
+    /// The colour ring wasn't found but a WHITE hover-highlight ring was: the user is hovering
+    /// the jewel (tooltip up), which hides the colour the mask needs. The caller asks them to
+    /// move off the jewel and retries. No pose is usable in this state.
+    hovered: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -426,6 +430,30 @@ fn capture_and_detect(
         }
     }
     let Some((c, jewel)) = best else {
+        // No colour ring. If a WHITE ring is there instead, the jewel is being hovered (its
+        // tooltip is up, recolouring the ring) — signal that so the caller can ask the user to
+        // move off it, rather than the generic "can't find socket" dead end.
+        if let Some(wc) = ring::detect_white(buf, w, h) {
+            if wc.coverage >= 0.5 {
+                return Ok(Some(Detection {
+                    cx: wc.cx,
+                    cy: wc.cy,
+                    r: wc.r,
+                    support: 0,
+                    coverage: wc.coverage,
+                    resid: wc.resid,
+                    frame_w: w,
+                    frame_h: h,
+                    jewel: String::new(),
+                    jewel_match: 0.0,
+                    gem: 0.0,
+                    socket_id: -1,
+                    socket_score: 0.0,
+                    socket_second: 0.0,
+                    hovered: true,
+                }));
+            }
+        }
         return Ok(None);
     };
     // The ring fit IS the pose: centre = the socket's projected position, radius = R_tree px,
@@ -496,6 +524,7 @@ fn capture_and_detect(
         socket_id,
         socket_score,
         socket_second,
+        hovered: false,
     }))
 }
 
@@ -657,6 +686,17 @@ fn read_jewel() -> Result<Option<JewelInfo>, String> {
     Ok(parse_jewel(&text))
 }
 
+/// The OS clipboard's change counter. Windows bumps it on EVERY clipboard write — even when
+/// the new contents are byte-identical to the old — so the overlay can tell that the user
+/// pressed Ctrl+C again (re-copying the same jewel) where a text diff would see no change.
+/// Used by the arming handshake to gate seed capture on a deliberate, fresh copy.
+#[tauri::command]
+fn clipboard_seq() -> u32 {
+    // SAFE: GetClipboardSequenceNumber reads a process-wide counter and takes no arguments,
+    // touches no memory we own, and cannot fail.
+    unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+}
+
 /// OCR a region of the primary monitor and return the recognised lines, each with its
 /// bounding-box centre in full-frame physical px. The region is a `w*h` box centred on
 /// (`cx`,`cy`) — the caller passes the cursor so the hovered node's tooltip is captured
@@ -812,6 +852,7 @@ fn main() {
             capture_and_detect,
             get_cursor,
             read_jewel,
+            clipboard_seq,
             ocr_region,
             export_records,
             submit_observations,

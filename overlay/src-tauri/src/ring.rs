@@ -105,10 +105,30 @@ fn solve3(a: &[[f64; 3]; 3], b: &[f64; 3], det: f64) -> [f64; 3] {
     out
 }
 
+/// True for the WHITE highlight ring PoE draws around the socket when the jewel is
+/// hovered (its tooltip is up). Near-white and bright: the channels are close together
+/// and all high. Used only to recognise the "you're hovering the jewel" state, where the
+/// colour mask finds nothing because the ring is no longer green/blue.
+fn is_white(r: i32, g: i32, b: i32) -> bool {
+    r > 180 && g > 180 && b > 180 && (r - g).abs() < 30 && (g - b).abs() < 30 && (r - b).abs() < 30
+}
+
 /// Detect the jewel ring in an RGBA image buffer (`width`x`height`, 4 bytes/px).
 /// Returns the fitted circle in image-pixel coordinates, or None if too few ring
 /// pixels were found / the fit didn't converge to a plausible circle.
 pub fn detect(buf: &[u8], width: u32, height: u32, jewel: Jewel) -> Option<Circle> {
+    detect_masked(buf, width, height, |r, g, b| jewel.matches(r, g, b))
+}
+
+/// Detect the white hover-highlight ring (see `is_white`). Same geometry/robustness as the
+/// colour ring; lets the caller tell the user to move the cursor off the jewel.
+pub fn detect_white(buf: &[u8], width: u32, height: u32) -> Option<Circle> {
+    detect_masked(buf, width, height, is_white)
+}
+
+/// Ring detection over an arbitrary pixel mask. `detect`/`detect_white` are thin wrappers
+/// that supply the colour or white predicate.
+fn detect_masked(buf: &[u8], width: u32, height: u32, mask: impl Fn(i32, i32, i32) -> bool) -> Option<Circle> {
     let w = width as usize;
     let h = height as usize;
     // Subsample by 2 for speed; the fit is over-determined so half the pixels is plenty.
@@ -123,7 +143,7 @@ pub fn detect(buf: &[u8], width: u32, height: u32, jewel: Jewel) -> Option<Circl
             let r = buf[i] as i32;
             let g = buf[i + 1] as i32;
             let b = buf[i + 2] as i32;
-            if jewel.matches(r, g, b) {
+            if mask(r, g, b) {
                 pts.push((x as f64, y as f64));
             }
             x += step;
