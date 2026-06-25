@@ -146,6 +146,9 @@ interface RecordedTransform {
   confidence: number;
   /** True once this observation has been accepted by the server. */
   synced: boolean;
+  /** Quarantined: the server permanently rejected this row (bad FK / seed out of
+   *  range), so it's excluded from auto-retry to stop it blocking and spamming. */
+  failed?: boolean;
 }
 const recorded = new Map<string, RecordedTransform>();
 // Keyed by (seed, node) — NOT socket: a timeless jewel's transform for a node depends only
@@ -219,34 +222,81 @@ function loadRecords(): void {
 }
 const pendingSync = (): number => {
   let n = 0;
-  for (const r of recorded.values()) if (!r.synced) n++;
+  for (const r of recorded.values()) if (!r.synced && !r.failed) n++;
+  return n;
+};
+const failedSync = (): number => {
+  let n = 0;
+  for (const r of recorded.values()) if (!r.synced && r.failed) n++;
   return n;
 };
 
-// Push every not-yet-synced observation to the Worker in one batched POST. Idempotent
-// upserts make retries safe; rows the server accepts are marked synced and persisted.
-// Network/server failures leave records pending for the next flush (no data loss).
+// Cap each POST well under the server's hourly budget so one flush can't trip the
+// throttle in a single shot, and so a rejected batch only forces row-by-row retry
+// over a small slice rather than the whole backlog.
+const SYNC_CHUNK = 200;
+// When the server reports its hourly limit, stop hammering it: pause all syncing for
+// this long, then resume from where we left off (the window will have moved on).
+const THROTTLE_BACKOFF_MS = 5 * 60 * 1000;
+let backoffUntil = 0;
+
+// The Worker surfaces the DB throttle (PT429) as "HTTP 400: …rate limit exceeded…".
+const isThrottle = (msg: string): boolean => /rate limit|PT429|\b429\b/i.test(msg);
+
+async function postObservations(batch: [string, RecordedTransform][]): Promise<void> {
+  const observations = batch.map(([, r]) => ({
+    jewel_type: r.jewel,
+    conqueror: r.conqueror || null,
+    seed: r.seed,
+    node_id: r.nodeId,
+    result_notable_id: r.resultId,
+    source_socket: r.socketId
+  }));
+  const body = JSON.stringify({ client_id: clientId, observations });
+  await invoke('submit_observations', { workerUrl: WORKER_BASE, body });
+}
+
+// Push not-yet-synced observations to the Worker in capped chunks. Idempotent upserts
+// make retries safe. A whole chunk is one DB transaction that aborts if any single row
+// is rejected, so on chunk failure we fall back to row-by-row: valid rows land and only
+// genuinely-bad rows are quarantined (failed=true) instead of blocking the backlog
+// forever. Throttle responses pause syncing rather than spin.
 async function flushSync(): Promise<void> {
-  if (syncing) return;
-  const batch = [...recorded.entries()].filter(([, r]) => !r.synced);
-  if (batch.length === 0) return;
+  if (syncing || Date.now() < backoffUntil) return;
+  const pending = [...recorded.entries()].filter(([, r]) => !r.synced && !r.failed);
+  if (pending.length === 0) return;
   syncing = true;
   try {
-    const observations = batch.map(([, r]) => ({
-      jewel_type: r.jewel,
-      conqueror: r.conqueror || null,
-      seed: r.seed,
-      node_id: r.nodeId,
-      result_notable_id: r.resultId,
-      source_socket: r.socketId
-    }));
-    const body = JSON.stringify({ client_id: clientId, observations });
-    await invoke('submit_observations', { workerUrl: WORKER_BASE, body });
-    // Server accepted (FK-valid + upserted). Mark this batch synced.
-    for (const [, r] of batch) r.synced = true;
-    saveRecords();
-  } catch (e) {
-    setText(syncEl, `sync pending (${pendingSync()}) — ${e}`, 'warn');
+    for (let i = 0; i < pending.length; i += SYNC_CHUNK) {
+      const chunk = pending.slice(i, i + SYNC_CHUNK);
+      try {
+        await postObservations(chunk);
+        for (const [, r] of chunk) r.synced = true;
+        saveRecords();
+      } catch (e) {
+        if (isThrottle(String(e))) {
+          backoffUntil = Date.now() + THROTTLE_BACKOFF_MS;
+          return; // resume on a later interval, once the hourly window has moved
+        }
+        // One bad row aborted the chunk's transaction. Retry each row alone so the
+        // rest still sync and only the offender is quarantined.
+        for (const entry of chunk) {
+          try {
+            await postObservations([entry]);
+            entry[1].synced = true;
+          } catch (e2) {
+            if (isThrottle(String(e2))) {
+              backoffUntil = Date.now() + THROTTLE_BACKOFF_MS;
+              saveRecords();
+              return;
+            }
+            entry[1].failed = true; // permanent rejection (bad FK / seed range)
+            console.warn('observation rejected:', entry[1], String(e2));
+          }
+        }
+        saveRecords();
+      }
+    }
   } finally {
     syncing = false;
     updateSyncStatus();
@@ -254,9 +304,18 @@ async function flushSync(): Promise<void> {
 }
 function updateSyncStatus(): void {
   const total = recorded.size;
+  if (total === 0) {
+    syncEl.textContent = '';
+    syncEl.className = 'ok';
+    return;
+  }
   const pending = pendingSync();
-  syncEl.textContent = total === 0 ? '' : `synced ${total - pending}/${total}${pending ? ` · ${pending} pending` : ''}`;
-  syncEl.className = pending ? 'warn' : 'ok';
+  const failed = failedSync();
+  const parts = [`synced ${total - pending - failed}/${total}`];
+  if (pending) parts.push(Date.now() < backoffUntil ? `${pending} pending (paused)` : `${pending} pending`);
+  if (failed) parts.push(`${failed} rejected`);
+  syncEl.textContent = parts.join(' · ');
+  syncEl.className = pending || failed ? 'warn' : 'ok';
 }
 
 // Pull the community consensus for a (jewel, seed) so already-recorded nodes are shown and
