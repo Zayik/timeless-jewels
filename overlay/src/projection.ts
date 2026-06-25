@@ -72,6 +72,38 @@ export function projectNotables(
   });
 }
 
+/**
+ * Order a socket's notables into a greedy nearest-neighbor path so consecutive
+ * nodes are physically close on screen (no jumping across the ring). Seeded at the
+ * node nearest the socket centre, then each step picks the nearest unvisited node.
+ * Computed in tree coords — valid for screen too, since screen is a uniform
+ * scale+translate of tree space.
+ */
+export function orderNotablesNearest(socket: Socket): Notable[] {
+  const remaining = [...socket.notables];
+  if (remaining.length <= 2) return remaining;
+  const path: Notable[] = [];
+  // Seed: nearest to the socket centre (matches the "start near the jewel" mental model).
+  let curX = socket.x;
+  let curY = socket.y;
+  while (remaining.length) {
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const d = Math.hypot(remaining[i].x - curX, remaining[i].y - curY);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    const n = remaining.splice(best, 1)[0];
+    path.push(n);
+    curX = n.x;
+    curY = n.y;
+  }
+  return path;
+}
+
 /** Ring centre/radius converted to overlay CSS px (for drawing the ring guide). */
 export function ringInCss(ring: Ring, dpr: number): { cx: number; cy: number; r: number } {
   return { cx: ring.cx / dpr, cy: ring.cy / dpr, r: ring.r / dpr };

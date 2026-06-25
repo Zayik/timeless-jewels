@@ -19,6 +19,7 @@ import {
   projectNotables,
   ringInCss,
   nearestNode,
+  orderNotablesNearest,
   type Notable,
   type Socket,
   type SocketData,
@@ -31,7 +32,9 @@ const data = socketData as SocketData;
 const vocab = vocabData as Record<string, Vocab[]>;
 // Sorted socket list for manual cycling. Auto-detect picks a starting guess; the
 // user corrects with Ctrl+Shift+[ / ] while watching the highlights snap to nodes.
-const socketList: Socket[] = [...data.sockets].sort((a, b) => a.y - b.y || a.x - b.x);
+const socketList: Socket[] = [...data.sockets]
+  .map((s) => ({ ...s, notables: orderNotablesNearest(s) }))
+  .sort((a, b) => a.y - b.y || a.x - b.x);
 const indexById = new Map<number, number>(socketList.map((s, i) => [s.socketId, i]));
 const posLabel = (s: Socket): string => {
   const v = s.y < -2500 ? 'top' : s.y > 2500 ? 'bottom' : 'mid';
