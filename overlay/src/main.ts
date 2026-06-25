@@ -86,6 +86,7 @@ app.innerHTML = `
     </div>
   </div>
   <svg id="layer"></svg>
+  <div id="toast"></div>
 `;
 const modeEl = document.getElementById('mode')!;
 const detectEl = document.getElementById('detect')!;
@@ -94,7 +95,40 @@ const dbInfoEl = document.getElementById('dbinfo')!;
 const statusEl = document.getElementById('status')!;
 const progressEl = document.getElementById('progress')!;
 const syncEl = document.getElementById('sync')!;
+const toastEl = document.getElementById('toast')!;
 const layer = document.getElementById('layer') as unknown as SVGSVGElement;
+
+// Transient centre-screen notice (e.g. "Already captured by you.") that fades out after a few
+// seconds. Independent of the panel's status lines so it can't be missed mid-game.
+const TOAST_MS = 5000;
+let toastTimer: number | undefined;
+// Show the notice anchored just below a CSS point (the jewel, the focal point the user is
+// already looking at). Without a point it falls back to screen centre.
+function showToast(msg: string, at?: { x: number; y: number }): void {
+  toastEl.textContent = msg;
+  if (at) {
+    toastEl.style.left = `${at.x}px`;
+    toastEl.style.top = `${at.y}px`;
+    toastEl.style.transform = 'translate(-50%, 0)'; // anchor is the toast's top-centre
+  } else {
+    toastEl.style.left = '50%';
+    toastEl.style.top = '50%';
+    toastEl.style.transform = 'translate(-50%, -50%)';
+  }
+  toastEl.classList.add('show');
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove('show'), TOAST_MS);
+}
+
+// CSS point just below the jewel socket — close enough to stay in the user's focus, but clear
+// of the item tooltip (which opens above/beside the jewel). A small fixed drop from the socket
+// centre, NOT the full ring radius, which would land it far down the tree.
+const TOAST_DROP = 48;
+function underJewelPoint(pose: { cx: number; cy: number; r: number }): { x: number; y: number } {
+  const dpr = window.devicePixelRatio || 1;
+  const css = ringInCss({ ...pose, support: 0, frame_w: 0, frame_h: 0 }, dpr);
+  return { x: css.cx, y: css.cy + TOAST_DROP };
+}
 function updateModeLabel(): void {
   if (active) {
     modeEl.innerHTML = '■ Stop recording jewel <span class="key">Ctrl+Shift+K</span>';
@@ -424,6 +458,12 @@ function coveredHere(): number {
   const s = socket();
   return s.notables.reduce((n, x) => n + (isCovered(x) ? 1 : 0), 0);
 }
+// True when every notable in the current socket is already recorded by YOU for this seed —
+// re-capturing this exact jewel would just paint the screen green with nothing left to do.
+function allRecordedByYouHere(): boolean {
+  const s = socket();
+  return s.notables.length > 0 && s.notables.every((n) => isRecorded(n.skill));
+}
 function updateProgress() {
   if (active && lockedPose) {
     const s = socket();
@@ -751,6 +791,19 @@ function startActiveRecording(): void {
   if (armTimer) window.clearInterval(armTimer);
   armTimer = undefined;
   clearRedetect();
+  // Nothing to do — you've already recorded every notable in this socket for this seed.
+  // Flash a brief notice and return to idle instead of locking a screen full of green.
+  // (Only when the socket is actually identified, so we never falsely dismiss an unsure guess.)
+  if (socketChosen && allRecordedByYouHere()) {
+    const at = lockedPose ? underJewelPoint(lockedPose) : undefined;
+    lockedPose = null;
+    clearLayer();
+    updateModeLabel();
+    setText(detectEl, IDLE_PROMPT, 'muted');
+    setText(statusEl, '', 'muted');
+    showToast('Already captured by you.', at);
+    return;
+  }
   active = true;
   hoverSkill = null;
   updateModeLabel();

@@ -134,6 +134,29 @@ body {
   color: #ddd;
 }
 
+/* Transient centre-screen notice (e.g. "Already captured by you."). Fades out; never clickable. */
+#toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 12px 20px;
+  background: rgba(18, 18, 22, 0.95);
+  border: 1px solid rgba(255, 138, 91, 0.6);
+  border-radius: 8px;
+  color: var(--warn);
+  font-size: 16px;
+  font-weight: 600;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+#toast.show {
+  opacity: 1;
+}
+
 /* Highlight layer: full screen, never intercepts the mouse. */
 #layer {
   position: fixed;
