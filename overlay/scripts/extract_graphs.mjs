@@ -5,7 +5,7 @@
 // EVERY renderable node within R_tree of each jewel socket plus the edges among
 // them. Node icon art changes under a timeless jewel, but node POSITIONS and the
 // connector EDGES do not — that stable geometry is what we match against a screen
-// capture to decide which of the 14 sockets a detected ring belongs to.
+// capture to decide which of the 12 jewel sockets a detected ring belongs to.
 //
 // Run: node scripts/extract_graphs.mjs   (writes src/poe2_socket_graphs.json)
 
@@ -35,7 +35,11 @@ const round = (v) => Math.round(v * 10) / 10;
 const sockets = [];
 for (const [key, n] of Object.entries(nodes)) {
   if (key === 'root' || !n?.isJewelSocket || typeof n.x !== 'number') continue;
-  if (typeof n.id === 'string' && n.id.includes('voices')) continue; // cluster voice sockets
+  // Only real timeless-jewel sockets ("jewel_slot####"). Excludes the "voices_jewel_slot*"
+  // Sinister cluster sockets, Zarokh's Gift (DeliriumAnoint_ZarokhsGift_), and ascendancy
+  // sockets (AscendancyWitch*) — none can hold a timeless jewel, and leaving them in made the
+  // detector lock onto e.g. Zarokh's Gift instead of the real socket.
+  if (typeof n.id !== 'string' || !n.id.startsWith('jewel_slot')) continue;
 
   const reach = R_TREE * MARGIN;
   // Collect in-reach renderable nodes (exclude the socket itself & other sockets,

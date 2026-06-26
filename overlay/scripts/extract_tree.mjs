@@ -28,11 +28,22 @@ const nodes = tree.nodes;
 const isRenderable = (n) =>
   n && typeof n.x === 'number' && typeof n.y === 'number' && !n.isProxy && !n.isMastery;
 
+// Druid-Oracle-only nodes (the Ascendancy "The Unseen Path", skill 5571, lets a Druid Oracle
+// allocate them) are physically on the main tree, so they fall inside jewel radii — but a
+// non-Oracle character can't allocate or even see them. Flag them so the overlay can skip them
+// for players who aren't a Druid Oracle (it would otherwise show targets they can never capture).
+const UNSEEN_PATH_SKILL = 5571;
+const isOracleOnly = (n) =>
+  Array.isArray(n.unlockConstraint?.nodes) && n.unlockConstraint.nodes.includes(UNSEEN_PATH_SKILL);
+
 const sockets = [];
 for (const [key, n] of Object.entries(nodes)) {
   if (key === 'root' || !n?.isJewelSocket || typeof n.x !== 'number') continue;
-  // Skip the clustered "Sinister" voice sockets — not timeless-jewel sockets.
-  if (typeof n.id === 'string' && n.id.includes('voices')) continue;
+  // Only real timeless-jewel sockets, whose ids are "jewel_slot####". Other isJewelSocket
+  // nodes — the "voices_jewel_slot*" Sinister cluster sockets, Zarokh's Gift
+  // (DeliriumAnoint_ZarokhsGift_), and ascendancy sockets (AscendancyWitch*) — can't take a
+  // timeless jewel and must not be detection candidates or they get matched by mistake.
+  if (typeof n.id !== 'string' || !n.id.startsWith('jewel_slot')) continue;
 
   const affected = [];
   for (const [k2, m] of Object.entries(nodes)) {
@@ -51,7 +62,9 @@ for (const [key, n] of Object.entries(nodes)) {
       x: Math.round(m.x * 10) / 10,
       y: Math.round(m.y * 10) / 10,
       name: m.name ?? '',
-      kind: 'notable'
+      kind: 'notable',
+      // Present (true) only for Druid-Oracle-only nodes; omitted otherwise to keep the JSON small.
+      ...(isOracleOnly(m) ? { oracleOnly: true } : {})
     });
   }
   affected.sort((a, b) => Math.hypot(a.x - n.x, a.y - n.y) - Math.hypot(b.x - n.x, b.y - n.y));

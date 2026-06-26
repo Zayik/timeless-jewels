@@ -465,7 +465,7 @@ fn capture_and_detect(
 
     let g = graphs();
 
-    // Identify the socket by edge-chamfer registration over all 14 sockets — only when
+    // Identify the socket by edge-chamfer registration over all 12 jewel sockets — only when
     // asked. In the on-demand calibration model this runs on every (explicit) calibrate.
     let (mut socket_id, mut socket_score, mut socket_second) = (-1i64, 0.0f64, 0.0f64);
     if identify {
@@ -677,6 +677,17 @@ fn get_cursor(app: tauri::AppHandle) -> Result<CursorPos, String> {
     Ok(CursorPos { x: p.x, y: p.y })
 }
 
+/// Toggle the overlay's OS-level click-through. The window is click-through by default so it
+/// never intercepts game input; the frontend flips it OFF (enabled=false) only while the
+/// cursor is over the draggable status panel, so the panel can receive drag events, then back
+/// ON. Combined with the no-activate window style (see setup), flipping it never steals focus
+/// from the game.
+#[tauri::command]
+fn set_click_through(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let win = app.get_webview_window("main").ok_or("no main window")?;
+    win.set_ignore_cursor_events(enabled).map_err(|e| e.to_string())
+}
+
 /// Read the jewel's Ctrl+C item text from the OS clipboard and parse it. Returns
 /// None when the clipboard doesn't hold a recognisable timeless jewel.
 #[tauri::command]
@@ -697,43 +708,45 @@ fn clipboard_seq() -> u32 {
     unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() }
 }
 
-/// OCR a region of the primary monitor and return the recognised lines, each with its
-/// bounding-box centre in full-frame physical px. The region is a `w*h` box centred on
-/// (`cx`,`cy`) — the caller passes the cursor so the hovered node's tooltip is captured
-/// wherever it flips to. The crop is clamped to the frame; the caller fuzzy-matches the
-/// lines against the jewel's result-notable vocabulary.
+/// OCR the primary monitor and return the recognised lines whose centre falls inside a `w*h`
+/// box centred on (`cx`,`cy`) — the caller passes the cursor so the hovered node's tooltip is
+/// captured wherever it flips to. Centres are in full-frame physical px; the caller fuzzy-
+/// matches the lines against the jewel's result-notable vocabulary.
+///
+/// We OCR the *whole frame* and then drop out-of-box lines by coordinate, rather than feeding
+/// OCR a cropped or masked buffer. Two reasons, both observed on real captures:
+///   1. Windows.Media.Ocr rescales its input by the image's overall dimensions before
+///      recognition. A cropped buffer (seen at exactly 1400x1200) lands otherwise-crisp
+///      tooltip text on a bad internal scale and returns noise; the full frame reads reliably.
+///   2. Masking everything outside the box to black is itself a different image and triggers
+///      the same fragility — it was observed to make OCR *drop* the real tooltip line while a
+///      stale word from the overlay's status panel survived. Filtering by coordinate after a
+///      clean full-frame OCR avoids both: the engine always sees the same crisp full frame,
+///      and box membership is decided on the returned line centres.
+///
+/// Box membership is the only gate here. The caller still excludes its own panel region (it
+/// knows the panel's live bounds) before matching, so panel text inside the box can't inject
+/// false vocabulary matches.
 #[tauri::command]
 fn ocr_region(cx: f64, cy: f64, w: f64, h: f64) -> Result<Vec<OcrLine>, String> {
     let (frame, fw, fh) = capture_primary()?;
-    let (fw_i, fh_i) = (fw as i64, fh as i64);
-    let x0 = ((cx - w / 2.0).round() as i64).clamp(0, fw_i.saturating_sub(1));
-    let y0 = ((cy - h / 2.0).round() as i64).clamp(0, fh_i.saturating_sub(1));
-    let x1 = (x0 + w.round() as i64).clamp(x0, fw_i);
-    let y1 = (y0 + h.round() as i64).clamp(y0, fh_i);
-    let (cw, ch) = ((x1 - x0) as usize, (y1 - y0) as usize);
-    if cw == 0 || ch == 0 {
-        return Ok(Vec::new());
+    // Windows OCR wants BGRA8; xcap gives RGBA8, so swap R/B across the whole frame.
+    let n = (fw as usize) * (fh as usize);
+    let mut bgra = vec![0u8; n * 4];
+    for i in 0..n {
+        bgra[i * 4] = frame[i * 4 + 2];
+        bgra[i * 4 + 1] = frame[i * 4 + 1];
+        bgra[i * 4 + 2] = frame[i * 4];
+        bgra[i * 4 + 3] = frame[i * 4 + 3];
     }
-    // Windows OCR wants BGRA8; xcap gives RGBA8, so swap R/B as we copy the crop.
-    let fw_us = fw as usize;
-    let mut bgra = vec![0u8; cw * ch * 4];
-    for row in 0..ch {
-        let sy = y0 as usize + row;
-        for col in 0..cw {
-            let si = (sy * fw_us + (x0 as usize + col)) * 4;
-            let di = (row * cw + col) * 4;
-            bgra[di] = frame[si + 2];
-            bgra[di + 1] = frame[si + 1];
-            bgra[di + 2] = frame[si];
-            bgra[di + 3] = frame[si + 3];
-        }
-    }
-    let mut lines = ocr::recognize(&bgra, cw as u32, ch as u32)?;
-    for l in &mut lines {
-        l.cx += x0 as f64;
-        l.cy += y0 as f64;
-    }
-    Ok(lines)
+    let lines = ocr::recognize(&bgra, fw, fh)?;
+    // Keep lines whose centre lands in the cursor box (coords are already full-frame px).
+    let (x0, y0) = (cx - w / 2.0, cy - h / 2.0);
+    let (x1, y1) = (cx + w / 2.0, cy + h / 2.0);
+    Ok(lines
+        .into_iter()
+        .filter(|l| l.cx >= x0 && l.cx <= x1 && l.cy >= y0 && l.cy <= y1)
+        .collect())
 }
 
 /// POST a batch of recorded observations (serialised by the frontend) to the Worker write
@@ -811,10 +824,10 @@ fn main() {
     // compositing enabled. This is the standard remedy.
     std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu");
 
-    // Ctrl+Shift+K: start / stop recording the jewel (reads the jewel + detects its socket on
+    // Ctrl+Shift+X: start / stop recording the jewel (reads the jewel + detects its socket on
     // start). Ctrl+Shift+R: recalibrate the pose. Ctrl+Shift+[ ]: correct a wrong socket guess.
     // Ctrl+Shift+S: dump a debug screen capture.
-    let toggle_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyK);
+    let toggle_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyX);
     let recal_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR);
     let dump_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
     let prev_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::BracketLeft);
@@ -851,6 +864,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             capture_and_detect,
             get_cursor,
+            set_click_through,
             read_jewel,
             clipboard_seq,
             ocr_region,
@@ -866,12 +880,16 @@ fn main() {
             gs.register(prev_key)?;
             gs.register(next_key)?;
             if let Some(win) = app.get_webview_window("main") {
-                // Permanently click-through: the overlay never intercepts input, so
-                // it can't lock the screen or steal focus from the game. We do NOT
-                // resize/move the window here — the transparent layered window is
-                // created at its final size in tauri.conf.json, because resizing a
-                // transparent window after creation crashes WebView2 on Windows.
+                // Click-through by default: the overlay never intercepts input, so it can't
+                // lock the screen or steal focus from the game. The frontend flips this off
+                // briefly while the cursor is over the draggable status panel (see
+                // set_click_through). We do NOT resize/move the window here — the transparent
+                // layered window is created at its final size in tauri.conf.json, because
+                // resizing a transparent window after creation crashes WebView2 on Windows.
                 let _ = win.set_ignore_cursor_events(true);
+                // No-activate: even when click-through is briefly off (panel drag), clicking
+                // the overlay must not pull focus away from the borderless-fullscreen game.
+                let _ = win.set_focusable(false);
             }
             Ok(())
         })

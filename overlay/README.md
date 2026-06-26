@@ -30,7 +30,7 @@ outer boundary (the ticks point inward), pinning centre and radius tightly. The 
 animation jitter is irrelevant because we detect it only on an explicit calibrate.
 
 **On-demand calibration.** Detection (capture + ring fit + socket-ID + tree-snap, well
-under a second) runs ONLY when you calibrate — Ctrl+Shift+K to start, Ctrl+Shift+R to
+under a second) runs ONLY when you calibrate — Ctrl+Shift+X to start, Ctrl+Shift+R to
 recalibrate — and locks a fixed screen pose. Highlights are then drawn from that pose
 with no per-frame capture, so they persist while you pan/zoom or a tooltip covers the
 jewel; when they drift off the nodes you recalibrate. Cheap, and unbreakable by
@@ -90,7 +90,7 @@ pnpm app:build        # tauri build -> installer in src-tauri/target/release/bun
 1. Launch the overlay (it is always click-through; the panel top-left is informational).
 2. Open the passive tree in PoE2 with the jewel socketed; zoom/pan so the gold socket
    frame is clearly visible (no tooltip over it).
-3. Press **Ctrl+Shift+K** to calibrate. The jewel type and socket are auto-detected and
+3. Press **Ctrl+Shift+X** to calibrate. The jewel type and socket are auto-detected and
    a fixed pose is locked; each affected notable is highlighted (current target gold).
 4. Pan/zoom or open tooltips freely — the highlights stay put. When they drift off the
    nodes, press **Ctrl+Shift+R** to recalibrate.
@@ -122,7 +122,7 @@ throttle; the `catalog_consensus` view aggregates distinct contributors. See
 
 | Key | Action |
 |---|---|
-| `Ctrl+Shift+K` | Show/hide the overlay (calibrates on show) |
+| `Ctrl+Shift+X` | Show/hide the overlay (calibrates on show) |
 | `Ctrl+Shift+R` | Recalibrate the pose (after you pan/zoom) |
 | `Ctrl+Shift+J` | OCR + record current target node, advance (2nd press confirms a borderline match) |
 | `Ctrl+Shift+C` | Read the jewel (type + seed) from the Ctrl+C clipboard text |

@@ -30,6 +30,10 @@ export interface Notable extends TreePoint {
   id: string;
   name: string;
   kind: 'notable' | 'keystone';
+  /** True for Druid-Oracle-only nodes (behind "The Unseen Path"). A non-Oracle character can't
+   *  allocate them, so the overlay skips them as capture targets unless the player marks
+   *  themselves a Druid Oracle. Omitted (falsy) for normal nodes. */
+  oracleOnly?: boolean;
 }
 
 export interface Socket extends TreePoint {

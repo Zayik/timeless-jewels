@@ -1,14 +1,14 @@
 // PoE2 jewel-capture overlay — one-button recording, always click-through.
 //
 // The overlay window never intercepts input (it can't lock the screen or steal focus).
-// ONE hotkey drives everything: Ctrl+Shift+K — "Start recording jewel" reads the jewel from
+// ONE hotkey drives everything: Ctrl+Shift+X — "Start recording jewel" reads the jewel from
 // the clipboard (for the seed), detects the socket it's plugged into, and begins recording;
 // pressing it again stops. Recording is hands-free: rest the cursor on a notable so its in-game
 // tooltip appears and, after a short dwell, the overlay OCRs it (Windows.Media.Ocr), fuzzy-
 // matches the result name against the jewel's vocabulary, and records {seed, socket, base node
 // → result notable}, syncing in the background. When every notable in the socket is captured it
 // auto-finishes ("Jewel successfully recorded") and returns to idle — move the jewel to the next
-// socket and press Ctrl+Shift+K again to detect and record it.
+// socket and press Ctrl+Shift+X again to detect and record it.
 // Helpers: Ctrl+Shift+R recalibrate the pose · Ctrl+Shift+[ ] correct a wrong socket guess.
 
 import { invoke } from '@tauri-apps/api/core';
@@ -73,8 +73,8 @@ const MATCH_FLOOR = 0.3;
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <div id="panel">
-    <div id="mode" class="mode">▶ Start recording jewel <span class="key">Ctrl+Shift+K</span></div>
-    <div id="detect" class="muted">Copy the jewel in-game (Ctrl+C), then press Ctrl+Shift+K.</div>
+    <div id="mode" class="mode">▶ Start recording jewel <span class="key">Ctrl+Shift+X</span></div>
+    <div id="detect" class="muted">Copy the jewel in-game (Ctrl+C), then press Ctrl+Shift+X.</div>
     <div id="jewel" class="muted"></div>
     <div id="dbinfo" class="muted"></div>
     <div id="status" class="muted"></div>
@@ -84,6 +84,9 @@ app.innerHTML = `
       <div>Hover a node to auto-record it</div>
       <div><b>Ctrl+Shift+R</b> recalibrate · <b>Ctrl+Shift+[ ]</b> fix socket</div>
     </div>
+    <label id="oracleRow" class="oracle-row" title="Tick if your character is a Druid Oracle with The Unseen Path allocated — only then are the Oracle-only nodes capturable.">
+      <input type="checkbox" id="oracleChk" /> Druid Oracle (Unseen Path)
+    </label>
   </div>
   <svg id="layer"></svg>
   <div id="toast"></div>
@@ -96,7 +99,88 @@ const statusEl = document.getElementById('status')!;
 const progressEl = document.getElementById('progress')!;
 const syncEl = document.getElementById('sync')!;
 const toastEl = document.getElementById('toast')!;
+const panelEl = document.getElementById('panel')!;
 const layer = document.getElementById('layer') as unknown as SVGSVGElement;
+
+// --- draggable status panel ---------------------------------------------------------------
+// The overlay window is click-through (set_ignore_cursor_events), so the panel can only get
+// mouse events while we flip click-through OFF. A cheap cursor poll flips it off whenever the
+// OS cursor is over the panel (or a drag is in progress) and back on otherwise — the panel is
+// the only interactive surface, everything else stays click-through so the game gets the input.
+const PANEL_POS_KEY = 'poe2_overlay_panel_pos';
+let dragging = false;
+let dragDX = 0; // cursor-to-panel offset captured on mousedown (CSS px)
+let dragDY = 0;
+let clickThrough = true; // mirrors the OS state so we only invoke on a real change
+
+function clampPanelToViewport(left: number, top: number): { left: number; top: number } {
+  const r = panelEl.getBoundingClientRect();
+  const maxLeft = Math.max(0, window.innerWidth - r.width);
+  const maxTop = Math.max(0, window.innerHeight - r.height);
+  return { left: Math.min(Math.max(0, left), maxLeft), top: Math.min(Math.max(0, top), maxTop) };
+}
+function applyPanelPos(left: number, top: number): void {
+  const c = clampPanelToViewport(left, top);
+  panelEl.style.left = `${c.left}px`;
+  panelEl.style.top = `${c.top}px`;
+  panelEl.style.right = 'auto'; // override the CSS default so left/top fully control position
+}
+function savePanelPos(): void {
+  const r = panelEl.getBoundingClientRect();
+  localStorage.setItem(PANEL_POS_KEY, JSON.stringify({ left: r.left, top: r.top }));
+}
+function restorePanelPos(): void {
+  try {
+    const raw = localStorage.getItem(PANEL_POS_KEY);
+    if (!raw) return;
+    const { left, top } = JSON.parse(raw) as { left: number; top: number };
+    if (typeof left === 'number' && typeof top === 'number') applyPanelPos(left, top);
+  } catch {
+    /* corrupt store — keep the CSS default position */
+  }
+}
+
+panelEl.addEventListener('mousedown', (e: MouseEvent) => {
+  dragging = true;
+  const r = panelEl.getBoundingClientRect();
+  dragDX = e.clientX - r.left;
+  dragDY = e.clientY - r.top;
+  panelEl.classList.add('dragging');
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e: MouseEvent) => {
+  if (dragging) applyPanelPos(e.clientX - dragDX, e.clientY - dragDY);
+});
+window.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false;
+  panelEl.classList.remove('dragging');
+  savePanelPos();
+});
+
+// Poll the OS cursor and flip click-through so the panel is interactive only when needed.
+// Runs always (idle too), independent of the recording hover loop. Cheap; ~60ms cadence.
+async function clickThroughTick(): Promise<void> {
+  try {
+    const dpr = window.devicePixelRatio || 1;
+    const cur = (await invoke('get_cursor')) as { x: number; y: number };
+    const r = panelEl.getBoundingClientRect();
+    const pad = 4;
+    const x = cur.x / dpr;
+    const y = cur.y / dpr;
+    const overPanel =
+      x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+    const wantClickThrough = !(overPanel || dragging);
+    if (wantClickThrough !== clickThrough) {
+      clickThrough = wantClickThrough;
+      await invoke('set_click_through', { enabled: wantClickThrough });
+    }
+  } catch {
+    /* cursor unavailable this tick — leave the current state */
+  }
+}
+restorePanelPos();
+setInterval(() => void clickThroughTick(), 60);
 
 // Transient centre-screen notice (e.g. "Already captured by you.") that fades out after a few
 // seconds. Independent of the panel's status lines so it can't be missed mid-game.
@@ -131,25 +215,25 @@ function underJewelPoint(pose: { cx: number; cy: number; r: number }): { x: numb
 }
 function updateModeLabel(): void {
   if (active) {
-    modeEl.innerHTML = '■ Stop recording jewel <span class="key">Ctrl+Shift+K</span>';
+    modeEl.innerHTML = '■ Stop recording jewel <span class="key">Ctrl+Shift+X</span>';
     modeEl.className = 'mode recording';
   } else if (arming) {
-    modeEl.innerHTML = '… Waiting for jewel — Ctrl+C it <span class="key">Ctrl+Shift+K</span> to cancel';
+    modeEl.innerHTML = '… Waiting for jewel — Ctrl+C it <span class="key">Ctrl+Shift+X</span> to cancel';
     modeEl.className = 'mode arming';
   } else {
-    modeEl.innerHTML = '▶ Start recording jewel <span class="key">Ctrl+Shift+K</span>';
+    modeEl.innerHTML = '▶ Start recording jewel <span class="key">Ctrl+Shift+X</span>';
     modeEl.className = 'mode';
   }
 }
 
 // --- state ---
 // On-demand calibration model: detection (the expensive screen-capture + template match) runs
-// ONLY when the user calibrates (Ctrl+Shift+K to start, Ctrl+Shift+R to recalibrate). It locks
+// ONLY when the user calibrates (Ctrl+Shift+X to start, Ctrl+Shift+R to recalibrate). It locks
 // a fixed screen pose; highlights are drawn from that pose and persist while you pan/zoom or a
 // tooltip covers the jewel. When the view has moved enough that highlights drift off the nodes,
 // you recalibrate. A cheap cursor-only poll (no capture) keeps the hover indicator live.
 let active = false; // recording in progress (seed locked, hover auto-records)
-// Arming handshake: Ctrl+Shift+K from idle enters this state and waits for the user to
+// Arming handshake: Ctrl+Shift+X from idle enters this state and waits for the user to
 // deliberately Ctrl+C the jewel before recording starts, so the active seed is always one
 // the user just picked — never whatever happened to be on the clipboard.
 let arming = false;
@@ -178,6 +262,13 @@ interface JewelInfo {
 let jewelInfo: JewelInfo | null = null; // parsed from the jewel's Ctrl+C item text
 let targetIdx = 0;
 const socket = (): Socket => socketList[socketIdx];
+
+// Whether the player is a Druid Oracle with "The Unseen Path" allocated. When false (the
+// default — most characters aren't), the Oracle-only notables (oracleOnly) are skipped as
+// capture targets and don't count toward socket completion, since the player can't allocate or
+// hover them. Persisted across runs; toggled via the panel checkbox.
+const ORACLE_KEY = 'poe2_overlay_is_oracle';
+let isOraclePlayer = localStorage.getItem(ORACLE_KEY) === '1';
 
 // A recorded transform: which base node (in which socket, for which seed) became which
 // result notable, with the OCR match confidence. Submission-ready (resultId is the DB
@@ -226,6 +317,15 @@ const communityPartial = (n: Notable): boolean => {
 // node (orange target, hover-focus, auto-record) so you can add the verifying 2nd source; the
 // only difference is the "needs verify" annotation.
 const isCovered = (n: Notable): boolean => isRecorded(n.skill) || communityVerified(n);
+
+// A node the current player can actually allocate. Oracle-only nodes (Unseen Path) aren't in a
+// non-Oracle's tree, so they're not theirs to capture unless the player marks themselves an
+// Oracle. Everything else is always reachable.
+const reachable = (n: Notable): boolean => isOraclePlayer || !n.oracleOnly;
+// Still needs capturing here: reachable by this player and not already covered.
+const needsCapture = (n: Notable): boolean => reachable(n) && !isCovered(n);
+// Notables in the current socket that this player can actually capture.
+const reachableNotables = (): Notable[] => socket().notables.filter(reachable);
 
 // Node name annotated with its community status, so it's clear at the point of recording
 // whether someone already captured it (and whether that capture is verified yet).
@@ -436,6 +536,21 @@ const OCR_BOX_H = 1200;
 const ACCEPT = 0.75;
 const jewelVocab = (): Vocab[] => (jewelInfo ? (vocab[jewelInfo.jewel] ?? []) : []);
 
+// Drop OCR lines that sit over the status panel so its own text can't be matched as a notable.
+// `lines` carry physical-px centres; the panel's getBoundingClientRect is CSS px, so we scale
+// the line centre down by dpr before testing. A small pad covers the panel's soft shadow edge.
+function linesOutsidePanel(lines: OcrLine[], dpr: number): OcrLine[] {
+  const panel = document.getElementById('panel');
+  if (!panel) return lines;
+  const r = panel.getBoundingClientRect();
+  const pad = 6;
+  return lines.filter((l) => {
+    const x = l.cx / dpr;
+    const y = l.cy / dpr;
+    return !(x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad);
+  });
+}
+
 // --- hover auto-record ---
 // Resting the cursor on a notable (so its in-game tooltip is up) for DWELL_MS auto-OCRs and
 // records it — no keypress.
@@ -453,23 +568,24 @@ function setText(el: Element, msg: string, kind: 'ok' | 'warn' | 'muted' = 'mute
   el.textContent = msg;
   el.className = kind === 'muted' ? 'muted' : kind;
 }
-// How many of the current socket's notables are covered (recorded by you OR community-verified).
+// How many of the current socket's REACHABLE notables are covered (recorded by you OR
+// community-verified). Oracle-only nodes a non-Oracle can't reach are excluded from both the
+// count and the total, so the socket still completes for them.
 function coveredHere(): number {
-  const s = socket();
-  return s.notables.reduce((n, x) => n + (isCovered(x) ? 1 : 0), 0);
+  return reachableNotables().reduce((n, x) => n + (isCovered(x) ? 1 : 0), 0);
 }
-// True when every notable in the current socket is already recorded by YOU for this seed —
-// re-capturing this exact jewel would just paint the screen green with nothing left to do.
+// True when every notable in the current socket that this player can reach is already recorded
+// by YOU for this seed — re-capturing this exact jewel would just paint the screen green.
 function allRecordedByYouHere(): boolean {
-  const s = socket();
-  return s.notables.length > 0 && s.notables.every((n) => isRecorded(n.skill));
+  const r = reachableNotables();
+  return r.length > 0 && r.every((n) => isRecorded(n.skill));
 }
 function updateProgress() {
   if (active && lockedPose) {
     const s = socket();
     progressEl.textContent =
       `Socket ${socketIdx + 1}/${socketList.length} (${s.id} · ${posLabel(s)})` +
-      `${manualOverride ? ' [manual]' : ''} · ${coveredHere()}/${s.notables.length} done` +
+      `${manualOverride ? ' [manual]' : ''} · ${coveredHere()}/${reachableNotables().length} done` +
       ` · Ctrl+Shift+[ ] to change`;
   } else {
     progressEl.textContent = '';
@@ -514,13 +630,14 @@ function draw(
   // auto-record it) — show ONLY that node so the other circles/labels don't overlap the
   // tooltip. Once it's recorded, fall through to draw everything again so the next node to
   // capture is immediately visible.
-  if (hover && !isCovered(hover.notable)) {
+  if (hover && reachable(hover.notable) && !isCovered(hover.notable)) {
     circle(hover.sx, hover.sy, nodeR * 1.15, 'hover');
     label(hover.sx + nodeR + 6, hover.sy + nodeR + 10, nodeLabel(hover.notable), 'hoverLabel');
     return;
   }
   projected.forEach((p, i) => {
     const n = p.notable;
+    if (!reachable(n)) return; // Oracle-only node, player isn't an Oracle — not theirs to capture
     const isTarget = i === targetIdx;
     // Precedence: your record (green) > community-verified (violet, skip) > target (orange)
     // > community single-confirmation (violet dashed, still record) > to-do (white).
@@ -532,7 +649,8 @@ function draw(
     else cls = 'node';
     circle(p.sx, p.sy, isTarget ? targetR : nodeR, cls);
   });
-  if (target) label(target.sx + targetR + 6, target.sy - targetR, `→ ${nodeLabel(target.notable)}`, 'targetLabel');
+  if (target && reachable(target.notable))
+    label(target.sx + targetR + 6, target.sy - targetR, `→ ${nodeLabel(target.notable)}`, 'targetLabel');
 }
 
 // Render the locked pose's notables (optionally with a cursor hover indicator). Cheap and
@@ -542,8 +660,10 @@ function renderLocked(cursorPhysical?: { x: number; y: number }): ProjectedNode 
   const dpr = window.devicePixelRatio || 1;
   const ring = { ...lockedPose, support: 0, frame_w: 0, frame_h: 0 };
   const projected = projectNotables(ring, socket(), data.rTree, dpr);
+  // Only nodes the player can capture are hover candidates, so an Oracle-only node never steals
+  // the hover focus for a non-Oracle (in-game that spot is empty for them).
   const hover = cursorPhysical
-    ? nearestNode(projected, cursorPhysical, dpr, (lockedPose.r / dpr) * 0.14)
+    ? nearestNode(projected.filter((p) => reachable(p.notable)), cursorPhysical, dpr, (lockedPose.r / dpr) * 0.14)
     : null;
   draw(projected, ringInCss(ring, dpr), hover);
   updateProgress();
@@ -560,7 +680,7 @@ function selectSocket(idx: number) {
 function resetTargetToFirstUnrecorded() {
   const s = socket();
   let i = 0;
-  while (i < s.notables.length && isCovered(s.notables[i])) i++;
+  while (i < s.notables.length && !needsCapture(s.notables[i])) i++;
   targetIdx = Math.min(i, Math.max(s.notables.length - 1, 0));
 }
 
@@ -702,7 +822,7 @@ function maybeAutoRecord(hover: ProjectedNode | null): void {
     autoTries = 0;
   }
   if (!hover || skill === null || !jewelInfo) return;
-  if (ocrBusy || autoTriedSkill === skill || isCovered(hover.notable)) return;
+  if (ocrBusy || autoTriedSkill === skill || !reachable(hover.notable) || isCovered(hover.notable)) return;
   if (Date.now() - hoverStart < DWELL_MS) return;
   autoTriedSkill = skill; // attempted this dwell — recordNode may reschedule a retry
   autoTries++;
@@ -710,9 +830,9 @@ function maybeAutoRecord(hover: ProjectedNode | null): void {
 }
 
 const ARM_POLL_MS = 300; // how often the arming poll checks for the deliberate Ctrl+C
-const IDLE_PROMPT = 'Press Ctrl+Shift+K, then hover the jewel in-game and press Ctrl+C.';
+const IDLE_PROMPT = 'Press Ctrl+Shift+X, then hover the jewel in-game and press Ctrl+C.';
 
-// Ctrl+Shift+K (idle): ARM. Snapshot the clipboard's change counter and wait for the user to
+// Ctrl+Shift+X (idle): ARM. Snapshot the clipboard's change counter and wait for the user to
 // deliberately Ctrl+C the jewel — only THEN do we read the seed. This guarantees the recorded
 // seed is the one the user just picked, never a stale jewel left on the clipboard. Recording
 // does not start until a valid jewel is copied (see armTick → startActiveRecording).
@@ -849,7 +969,7 @@ listen<number>('socket-cycle', (e) => {
 async function recordNode(p: ProjectedNode): Promise<void> {
   if (!active || !lockedPose || !jewelInfo || ocrBusy) return;
   const node = p.notable;
-  if (isCovered(node)) return;
+  if (!reachable(node) || isCovered(node)) return;
   ocrBusy = true;
   try {
     const dpr = window.devicePixelRatio || 1;
@@ -861,7 +981,11 @@ async function recordNode(p: ProjectedNode): Promise<void> {
       w: OCR_BOX_W,
       h: OCR_BOX_H
     })) as OcrLine[];
-    const m = matchNotable(lines, jewelVocab(), targetPhysical);
+    // Drop any line over our own status panel: when a tooltip clamps to the top-left it lands
+    // beside the panel, which is inside the cursor box, and the panel's stale "Recorded: … →
+    // <notable>" text would otherwise match the vocabulary. Line centres are physical px; the
+    // panel rect is CSS px, so scale by dpr.
+    const m = matchNotable(linesOutsidePanel(lines, dpr), jewelVocab(), targetPhysical);
     if (m && m.confidence >= ACCEPT) {
       commitRecord(node, m);
     } else if (autoTries < AUTO_MAX_TRIES) {
@@ -894,12 +1018,12 @@ function commitRecord(target: Notable, m: Match): void {
   });
   saveRecords();
   setText(statusEl, `Recorded: ${target.name} → ${m.name} (${Math.round(m.confidence * 100)}%)`, 'ok');
-  // Advance to the next not-yet-covered notable.
+  // Advance to the next notable that still needs capturing (skip covered AND unreachable).
   let next = targetIdx + 1;
-  while (next < s.notables.length && isCovered(s.notables[next])) next++;
+  while (next < s.notables.length && !needsCapture(s.notables[next])) next++;
   targetIdx = next;
   void flushSync();
-  if (coveredHere() >= s.notables.length) {
+  if (coveredHere() >= reachableNotables().length) {
     void completeSocket();
   } else {
     renderLocked();
@@ -911,7 +1035,7 @@ function commitRecord(target: Notable, m: Match): void {
 async function completeSocket(): Promise<void> {
   await flushSync();
   stopRecording(
-    'Jewel successfully recorded ✓ — move the jewel to the next socket and press Ctrl+Shift+K.',
+    'Jewel successfully recorded ✓ — move the jewel to the next socket and press Ctrl+Shift+X.',
     'ok'
   );
 }
@@ -933,6 +1057,24 @@ function bindJewel(info: JewelInfo): void {
 // Debug: Ctrl+Shift+S dumps a raw screen capture for mask tuning.
 listen<string>('debug-capture', (e) => {
   setText(statusEl, `Saved: ${e.payload}`, e.payload.startsWith('ERROR') ? 'warn' : 'ok');
+});
+
+// --- Druid Oracle toggle (panel checkbox) ---
+// The panel becomes interactive when the cursor is over it (clickThroughTick flips click-through
+// off), so a checkbox is clickable here. stopPropagation on the row keeps the click from also
+// starting a panel drag. Ticking it makes the Oracle-only nodes capturable; unticking skips them.
+const oracleChk = document.getElementById('oracleChk') as HTMLInputElement;
+const oracleRow = document.getElementById('oracleRow')!;
+oracleChk.checked = isOraclePlayer;
+oracleRow.addEventListener('mousedown', (e) => e.stopPropagation());
+oracleChk.addEventListener('change', () => {
+  isOraclePlayer = oracleChk.checked;
+  localStorage.setItem(ORACLE_KEY, isOraclePlayer ? '1' : '0');
+  // Re-point the target at the first node that still needs capture and redraw — Oracle-only
+  // nodes appear or disappear as targets with the new reachable set.
+  resetTargetToFirstUnrecorded();
+  if (active && lockedPose) renderLocked();
+  else updateProgress();
 });
 
 setText(detectEl, IDLE_PROMPT, 'muted');

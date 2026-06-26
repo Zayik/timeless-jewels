@@ -33,7 +33,15 @@ body {
   border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
   z-index: 10;
-  pointer-events: none;
+  /* Draggable: the window is click-through except while the cursor is over this panel (the
+     frontend toggles OS click-through via set_click_through), so the panel can receive drag
+     events. cursor:move signals it; user-select:none stops text selection mid-drag. */
+  pointer-events: auto;
+  cursor: move;
+  user-select: none;
+}
+#panel.dragging {
+  cursor: grabbing;
 }
 
 #panel h1 {
@@ -132,6 +140,26 @@ body {
 }
 #hint b {
   color: #ddd;
+}
+
+/* Druid Oracle (Unseen Path) toggle — gates the Oracle-only capture targets. id+class beats
+   the generic `#panel label` so this lays out as an inline, clickable row. */
+#oracleRow.oracle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid #333;
+  font-size: 12px;
+  color: #bbb;
+  cursor: pointer;
+  user-select: none;
+}
+#oracleRow.oracle-row input {
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
 }
 
 /* Transient centre-screen notice (e.g. "Already captured by you."). Fades out; never clickable. */
