@@ -6,9 +6,10 @@
 
 const isLocalhost = (): boolean => typeof window !== 'undefined' && window.location.hostname === 'localhost';
 
-// Worker base for PoE2 reads. In dev the Vite proxy forwards /api/poe2/* to the
-// local `wrangler dev`, so a relative base works. In production we hit the
-// deployed Worker via the same env var the trade API uses.
+// Worker base for PoE2 reads. In dev the Vite proxy forwards /api/poe2/* to the Worker
+// (by default the same production Worker the overlay writes to — see vite.config.js
+// POE2_WORKER_URL), so a relative base works. In production we hit the deployed Worker via
+// the same env var the trade API uses.
 export const workerBase = (): string => {
   if (isLocalhost()) {
     return '';

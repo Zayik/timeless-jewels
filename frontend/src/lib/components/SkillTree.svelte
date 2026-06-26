@@ -22,6 +22,12 @@
   export let highlighted: number[] = [];
   export let disabled: number[] = [];
   export let highlightJewels = false;
+  // PoE2 only: community-recorded transforms for the selected seed, keyed by node.skill. When
+  // present, the tooltip shows each affected notable's recorded result (PoE2 has no PRNG, so
+  // calculator.Calculate returns nothing). Undefined on PoE1, which uses the calculator below.
+  export let poe2Transforms:
+    | Map<number, { name: string; stats: string[]; confirmations: number; verified: boolean }>
+    | undefined = undefined;
 
   // Camera state — same offset/scaling semantics as the old Canvas 2D renderer, so the
   // pan/zoom math (and centerOnNode) is unchanged; PixiTree just turns it into a single
@@ -89,7 +95,19 @@
     let nodeName = node.name ?? '';
     let nodeStats: TooltipLine[] = (node.stats || []).map((s) => ({ text: s, special: false }));
 
-    if (!node.isJewelSocket && isActive(node)) {
+    if (!node.isJewelSocket && isActive(node) && poe2Transforms) {
+      // PoE2: the transform is whatever the community recorded for this (seed, node). Nodes
+      // with no record yet keep their base name/stats.
+      const t = poe2Transforms.get(node.skill as number);
+      if (t) {
+        nodeName = t.name;
+        nodeStats = t.stats.map((s) => ({ text: s, special: true }));
+        nodeStats.push({
+          text: t.verified ? 'verified' : `recorded ×${t.confirmations} (unverified)`,
+          special: true
+        });
+      }
+    } else if (!node.isJewelSocket && isActive(node)) {
       const passive = node.skill ? data.TreeToPassive[node.skill] : undefined;
       const conquerorMap = selectedJewel ? data.TimelessJewelConquerors[selectedJewel] : undefined;
 

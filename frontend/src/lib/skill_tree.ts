@@ -68,7 +68,7 @@ export let connections: Poe2Connection[] = [];
 
 // When true, the node tooltip appends raw node data (id, group, orbit, …) for
 // debugging the PoE2 tree. Off for PoE1.
-export let debugNodeInfo = false;
+export const debugNodeInfo = false;
 
 // PoE2 effect-backdrop nodes (decorative): masteries + themed notables/smalls, each
 // with activeEffectImage = a pattern drawn behind it. Lit when one of its governing
@@ -233,7 +233,6 @@ export const loadSkillTreePoe2 = async (basePath = ''): Promise<void> => {
   socketDrawScale = POE2_SOCKET_DRAW_SCALE;
   clipNodeIcons = true;
   connections = bundle.connections;
-  debugNodeInfo = true;
   effectNodes = bundle.effectNodes;
 
   // The shared page/components look passives up via data.TreeToPassive[node.skill]

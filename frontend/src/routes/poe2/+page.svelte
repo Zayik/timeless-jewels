@@ -2,10 +2,11 @@
   // PoE2 page — intentionally the SAME shell as the PoE1 page (routes/+page.svelte):
   // identical SkillTree canvas, side panel, and buttons, but driven by the PoE2
   // tree/jewels (loaded into the shared singletons by the PoE2 boot in +layout).
-  // The search backend (Neon DB of community-recorded transforms) does not exist
-  // yet, so every search action logs a TODO instead of computing — this lets us
-  // exercise the whole UI/data wiring now. PoE2 has no PRNG, so the seed preview
-  // is empty.
+  // Search is backed by the community DB (Neon, via the Worker) through lib/poe2/search:
+  // notable/socket searches hit /api/poe2/search, seed searches hit /api/poe2/consensus.
+  // The notable search defaults to verified-only (>= 2 distinct contributors); the
+  // "include unverified" toggle relaxes that so single-source records (e.g. your own
+  // freshly-recorded ones) also show. PoE2 has no PRNG, so the seed preview is empty.
   import SkillTree from '../../lib/components/SkillTree.svelte';
   import Select from 'svelte-select';
   import { page } from '$app/stores';
@@ -30,7 +31,13 @@
   } from '../../lib/storageManager';
   import type { MarketJewel } from '$lib/market_cache';
   import { SvelteSet } from 'svelte/reactivity';
-  import { searchSocket, searchAllSockets, searchSeed } from '../../lib/poe2/search';
+  import {
+    searchSocket,
+    searchAllSockets,
+    searchSeed,
+    getSeedTransforms,
+    type Poe2Transform
+  } from '../../lib/poe2/search';
   import { workerBase } from '../../lib/poe2/config';
 
   // The conqueror/variant doesn't affect the (variant-agnostic) DB search — it only
@@ -195,6 +202,10 @@
   };
 
   let searchResults = $state<SearchResultsData | undefined>(undefined);
+  // Notable/socket searches are verified-only by default (>= 2 distinct contributors).
+  // Toggle this on to also surface single-source records — e.g. ones you just recorded
+  // yourself that nobody else has confirmed yet. (Seed search always shows everything.)
+  let includeUnverified = $state(true);
 
   const tradeResults = $derived.by<{ seed: number }[]>(() => {
     if (searchResults) {
@@ -215,13 +226,6 @@
     }
     return [];
   });
-
-  // TODO: replace these with the PoE2 community-DB lookup. For now they build the
-  // exact same query objects as PoE1 (exercising the affected-node wiring) and log.
-  const todoSearch = (label: string, query: unknown) => {
-    console.log('TODO: Search DB for entries', label, query);
-    searching = false;
-  };
 
   const buildSocketToNodes = (): { [key: number]: number[] } => {
     const allSockets = Object.keys(skillTree.nodes)
@@ -253,7 +257,9 @@
         selectedJewel.label,
         Object.values(selectedStats),
         affectedSkills(),
-        minTotalWeight
+        minTotalWeight,
+        undefined,
+        !includeUnverified
       );
       massSearchResults = undefined;
       results = true;
@@ -274,7 +280,9 @@
         selectedJewel.label,
         Object.values(selectedStats),
         buildSocketToNodes(),
-        minTotalWeight
+        minTotalWeight,
+        undefined,
+        !includeUnverified
       );
       searchResults = undefined;
       results = true;
@@ -289,6 +297,35 @@
     highlighted = passives;
     updateUrl();
   };
+
+  // Every affected notable's recorded transform for the selected seed, fed to the tree so its
+  // tooltip shows what each node becomes — not just the searched stat. Refetched whenever the
+  // seed or jewel changes (covers result clicks, seed search, and URL restore). Empty until a
+  // seed is picked, and for seeds nobody has recorded.
+  let seedTransforms = $state<Map<number, Poe2Transform>>(new Map());
+  $effect(() => {
+    const activeSeed = seed;
+    const jewel = selectedJewel;
+    if (!activeSeed || !jewel) {
+      seedTransforms = new Map();
+      return;
+    }
+    let cancelled = false;
+    getSeedTransforms(jewel.label, jewel.value, activeSeed)
+      .then((m) => {
+        if (!cancelled) {
+          seedTransforms = m;
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          seedTransforms = new Map();
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   const selectAll = () => {
     disabled.clear();
@@ -423,23 +460,13 @@
     liveFeedStatus = 'Live feed stopped.';
   };
 
-  const startLiveFeed = (allSockets: boolean) => {
-    todoSearch(`startLiveFeed (${allSockets ? 'all sockets' : 'this socket'})`, {
-      jewel: selectedJewel?.value,
-      conqueror: selectedConqueror?.value,
-      socketToNodes: allSockets
-        ? buildSocketToNodes()
-        : circledNode
-          ? {
-              [circledNode]: affectedNodes
-                .filter((n) => !disabled.has(n.skill))
-                .map((n) => data.TreeToPassive[n.skill])
-                .filter(Boolean)
-                .map((n) => n.Index)
-            }
-          : {},
-      stats: Object.values(selectedStats)
-    });
+  const startLiveFeed = () => {
+    // PoE2 has no live trade feed yet — the dataset is community-recorded, not traded. Surface
+    // that instead of silently doing nothing.
+    liveFeedAllActive = false;
+    liveFeedSocketActive = false;
+    liveFeedStatus = 'Live trade feed is not available for PoE2.';
+    searching = false;
   };
 
   const marketSearchAllSockets = async () => {
@@ -457,7 +484,8 @@
         Object.values(selectedStats),
         buildSocketToNodes(),
         minTotalWeight,
-        filteredMarketJewels.map((j) => j.seed)
+        filteredMarketJewels.map((j) => j.seed),
+        !includeUnverified
       );
       searchResults = undefined;
       results = true;
@@ -481,7 +509,8 @@
         Object.values(selectedStats),
         affectedSkills(),
         minTotalWeight,
-        filteredMarketJewels.map((j) => j.seed)
+        filteredMarketJewels.map((j) => j.seed),
+        !includeUnverified
       );
       massSearchResults = undefined;
       results = true;
@@ -518,6 +547,7 @@
   selectedJewel={selectedJewel?.value}
   {highlighted}
   {seed}
+  poe2Transforms={seedTransforms}
   highlightJewels={!circledNode}
   disabled={[...disabled]}>
   {#if !collapsed}
@@ -577,6 +607,12 @@
           <Select items={jewels} bind:value={selectedJewel} on:change={changeJewel} />
 
           {#if selectedJewel}
+            <label
+              class="mb-2 flex cursor-pointer select-none items-center gap-2 text-sm text-gray-300"
+              title="Community records need 2 independent contributors to be 'verified'. Enable this to also show single-source records — including ones you just recorded yourself.">
+              <input type="checkbox" bind:checked={includeUnverified} />
+              Include unverified (single-source) records
+            </label>
             <SearchConfigPanel
               {selectedJewel}
               bind:selectedConqueror

@@ -14,6 +14,7 @@ import { skillTree } from '../skill_tree';
 import type { StatConfig, SearchResults, SearchWithSeed, MassSearchResults } from '../skill_tree';
 import type { Node } from '../skill_tree_types';
 import { poe2NotableVocabId } from '../calculator/data';
+import { getPoe2Notables } from './jewel_data';
 import { reverseSearch, getConsensus } from './api';
 import type { ReverseSearchRow } from './types';
 
@@ -190,13 +191,14 @@ export async function searchSocket(
   stats: StatConfig[],
   affectedSkills: number[],
   minTotalWeight: number,
-  seedFilter?: number[]
+  seedFilter?: number[],
+  verifiedOnly = true
 ): Promise<SearchResults> {
   const vocabIds = resolveVocabIds(stats);
   if (vocabIds.length === 0) {
     return { grouped: {}, raw: [] };
   }
-  const { results } = await reverseSearch(jewelName, vocabIds);
+  const { results } = await reverseSearch(jewelName, vocabIds, verifiedOnly);
   return scoreSocket(results, affectedSkills, stats, minTotalWeight, seedFilter && new Set(seedFilter));
 }
 
@@ -206,14 +208,15 @@ export async function searchAllSockets(
   stats: StatConfig[],
   socketToNodes: { [socketId: number]: number[] },
   minTotalWeight: number,
-  seedFilter?: number[]
+  seedFilter?: number[],
+  verifiedOnly = true
 ): Promise<MassSearchResults> {
   const out: MassSearchResults = { resultsBySocket: {} };
   const vocabIds = resolveVocabIds(stats);
   if (vocabIds.length === 0) {
     return out;
   }
-  const { results } = await reverseSearch(jewelName, vocabIds);
+  const { results } = await reverseSearch(jewelName, vocabIds, verifiedOnly);
   const filter = seedFilter && new Set(seedFilter);
   for (const socketIdStr of Object.keys(socketToNodes)) {
     const socketId = parseInt(socketIdStr);
@@ -247,4 +250,44 @@ export async function searchSeed(jewelName: string, seed: number): Promise<Searc
   }
   const one: SearchWithSeed = { seed, weight: skills.length, statCounts: {}, skills };
   return { grouped: { [skills.length]: [one] }, raw: [one] };
+}
+
+/** A node's recorded transform for one seed: the notable it becomes, its stat lines, and how
+ *  well-confirmed the record is. */
+export interface Poe2Transform {
+  name: string;
+  stats: string[];
+  confirmations: number;
+  verified: boolean;
+}
+
+/**
+ * Every recorded transform for a seed, keyed by the tree's numeric graph id (node.skill) so
+ * the tree/tooltip can look a node up directly. Resolves each result notable to its stat lines
+ * from the loaded jewel data. Drives the PoE2 "show every affected notable transformed" display
+ * when a seed is selected — independent of which stat was searched.
+ */
+export async function getSeedTransforms(
+  jewelName: string,
+  jewelId: number,
+  seed: number
+): Promise<Map<number, Poe2Transform>> {
+  const { results } = await getConsensus(jewelName, seed);
+  const nodeMap = getNodeIdToSkill();
+  const statsById = new Map(getPoe2Notables(jewelId).map((n) => [n.id, n.stats]));
+
+  const out = new Map<number, Poe2Transform>();
+  for (const r of results) {
+    const skill = nodeMap.get(r.node_id);
+    if (skill === undefined) {
+      continue;
+    }
+    out.set(skill, {
+      name: r.result_notable_name,
+      stats: statsById.get(r.result_notable_id) ?? [],
+      confirmations: Number(r.confirmations) || 0,
+      verified: r.verified
+    });
+  }
+  return out;
 }
