@@ -191,14 +191,13 @@ export async function searchSocket(
   stats: StatConfig[],
   affectedSkills: number[],
   minTotalWeight: number,
-  seedFilter?: number[],
-  verifiedOnly = true
+  seedFilter?: number[]
 ): Promise<SearchResults> {
   const vocabIds = resolveVocabIds(stats);
   if (vocabIds.length === 0) {
     return { grouped: {}, raw: [] };
   }
-  const { results } = await reverseSearch(jewelName, vocabIds, verifiedOnly);
+  const { results } = await reverseSearch(jewelName, vocabIds);
   return scoreSocket(results, affectedSkills, stats, minTotalWeight, seedFilter && new Set(seedFilter));
 }
 
@@ -208,15 +207,14 @@ export async function searchAllSockets(
   stats: StatConfig[],
   socketToNodes: { [socketId: number]: number[] },
   minTotalWeight: number,
-  seedFilter?: number[],
-  verifiedOnly = true
+  seedFilter?: number[]
 ): Promise<MassSearchResults> {
   const out: MassSearchResults = { resultsBySocket: {} };
   const vocabIds = resolveVocabIds(stats);
   if (vocabIds.length === 0) {
     return out;
   }
-  const { results } = await reverseSearch(jewelName, vocabIds, verifiedOnly);
+  const { results } = await reverseSearch(jewelName, vocabIds);
   const filter = seedFilter && new Set(seedFilter);
   for (const socketIdStr of Object.keys(socketToNodes)) {
     const socketId = parseInt(socketIdStr);

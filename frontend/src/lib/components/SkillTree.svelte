@@ -103,7 +103,7 @@
         nodeName = t.name;
         nodeStats = t.stats.map((s) => ({ text: s, special: true }));
         nodeStats.push({
-          text: t.verified ? 'verified' : `recorded ×${t.confirmations} (unverified)`,
+          text: `recorded ×${t.confirmations}`,
           special: true
         });
       }

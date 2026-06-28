@@ -39,13 +39,15 @@ export async function getConsensus(jewelId: string, seed: number): Promise<Conse
 
 /**
  * Reverse search: every recorded seed that turns some node into one of `notableIds`
- * (the notables' wiki ids = vocab_notables.id). Conqueror-agnostic. Defaults to
- * verified-only (>= 2 distinct clients); pass verifiedOnly=false to include the rest.
+ * (the notables' wiki ids = vocab_notables.id). Conqueror-agnostic. Returns every
+ * recorded seed (single-source included); pass verifiedOnly=true to filter to records
+ * confirmed by >= 2 distinct clients. The app no longer gates on this — the contributor
+ * pool is too small to validate everything — but the capability is kept for the future.
  */
 export async function reverseSearch(
   jewelId: string,
   notableIds: string[],
-  verifiedOnly = true
+  verifiedOnly = false
 ): Promise<ReverseSearchResponse> {
   const params = new URLSearchParams({ jewel: jewelId, notables: notableIds.join(',') });
   if (!verifiedOnly) {

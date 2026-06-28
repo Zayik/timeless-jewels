@@ -363,8 +363,9 @@ async function handlePoe2(
     // Reverse search: which recorded seeds turn some node into one of the desired
     // result notables. Conqueror-agnostic (catalog_consensus rolls off seed + node),
     // so we don't filter by conqueror here. The client filters the returned rows to
-    // its socket's affected nodes and scores/ranks them. Defaults to verified-only
-    // (>= 2 distinct clients); pass verified=0 to include single-client observations.
+    // its socket's affected nodes and scores/ranks them. Returns every recorded seed by
+    // default (the contributor pool is too small to gate on validation); pass verified=1
+    // to filter to records confirmed by >= 2 distinct clients.
     const jewel = url.searchParams.get('jewel');
     const notablesRaw = url.searchParams.get('notables');
     if (!jewel || !notablesRaw) {
@@ -377,7 +378,7 @@ async function handlePoe2(
     if (notables.length === 0) {
       return errorResponse('no notables given', 400, cors);
     }
-    const verifiedOnly = url.searchParams.get('verified') !== '0';
+    const verifiedOnly = url.searchParams.get('verified') === '1';
     // Fetch one extra row to detect (and flag) truncation rather than silently capping.
     const limit = 5000;
     const rows = verifiedOnly

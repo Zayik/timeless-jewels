@@ -4,9 +4,9 @@
   // tree/jewels (loaded into the shared singletons by the PoE2 boot in +layout).
   // Search is backed by the community DB (Neon, via the Worker) through lib/poe2/search:
   // notable/socket searches hit /api/poe2/search, seed searches hit /api/poe2/consensus.
-  // The notable search defaults to verified-only (>= 2 distinct contributors); the
-  // "include unverified" toggle relaxes that so single-source records (e.g. your own
-  // freshly-recorded ones) also show. PoE2 has no PRNG, so the seed preview is empty.
+  // Every recorded transform shows (no verification gate — the contributor pool is too small
+  // to validate everything); the tree tooltip shows a "recorded ×N" count as a soft trust
+  // signal. PoE2 has no PRNG, so the seed preview is empty.
   import SkillTree from '../../lib/components/SkillTree.svelte';
   import Select from 'svelte-select';
   import { page } from '$app/stores';
@@ -94,8 +94,28 @@
     searchParams.has('location') ? parseInt(searchParams.get('location')) : undefined
   );
 
+  // Druid-Oracle-only nodes (gated behind "The Unseen Path", skill 5571) sit on the main tree and
+  // fall inside jewel radii, but a non-Oracle character can't allocate them. Mirror the overlay:
+  // hide them from the affected-node set unless the user marks themselves a Druid Oracle.
+  const UNSEEN_PATH_SKILL = 5571;
+  const isOracleOnly = (n: Node): boolean => {
+    const constraintNodes = (n as Node & { unlockConstraint?: { nodes?: number[] } }).unlockConstraint?.nodes;
+    return Array.isArray(constraintNodes) && constraintNodes.includes(UNSEEN_PATH_SKILL);
+  };
+  const UNSEEN_PATH_KEY = 'poe2_unseen_path';
+  let unseenPath = $state(typeof localStorage !== 'undefined' && localStorage.getItem(UNSEEN_PATH_KEY) === '1');
+  $effect(() => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(UNSEEN_PATH_KEY, unseenPath ? '1' : '0');
+    }
+  });
+
   const affectedNodes = $derived(
-    circledNode ? getAffectedNodes(skillTree.nodes[circledNode]).filter((n) => !n.isJewelSocket && !n.isMastery) : []
+    circledNode
+      ? getAffectedNodes(skillTree.nodes[circledNode]).filter(
+          (n) => !n.isJewelSocket && !n.isMastery && (unseenPath || !isOracleOnly(n))
+        )
+      : []
   );
 
   // PoE2 has no deterministic PRNG — the live seed preview is not available.
@@ -202,10 +222,24 @@
   };
 
   let searchResults = $state<SearchResultsData | undefined>(undefined);
-  // Notable/socket searches are verified-only by default (>= 2 distinct contributors).
-  // Toggle this on to also surface single-source records — e.g. ones you just recorded
-  // yourself that nobody else has confirmed yet. (Seed search always shows everything.)
-  let includeUnverified = $state(true);
+
+  // Search settings live in a small gear (⚙) popover in the panel header rather than cluttering
+  // the panel body. Closed on any click outside the wrapper (capture-phase, so it fires before
+  // the gear's own toggle re-opens it).
+  let showSettings = $state(false);
+  const clickOutside = (node: HTMLElement, onOutside: () => void) => {
+    const handler = (e: MouseEvent) => {
+      if (!node.contains(e.target as globalThis.Node)) {
+        onOutside();
+      }
+    };
+    document.addEventListener('click', handler, true);
+    return {
+      destroy() {
+        document.removeEventListener('click', handler, true);
+      }
+    };
+  };
 
   const tradeResults = $derived.by<{ seed: number }[]>(() => {
     if (searchResults) {
@@ -233,7 +267,9 @@
       .filter((k) => skillTree.nodes[k]?.isJewelSocket);
     const map: { [key: number]: number[] } = {};
     allSockets.forEach((socketId) => {
-      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter((n) => n && !n.isJewelSocket && !n.isMastery);
+      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter(
+        (n) => n && !n.isJewelSocket && !n.isMastery && (unseenPath || !isOracleOnly(n))
+      );
       map[socketId] = affected
         .map((n) => data.TreeToPassive[n.skill])
         .filter(Boolean)
@@ -258,8 +294,7 @@
         Object.values(selectedStats),
         affectedSkills(),
         minTotalWeight,
-        undefined,
-        !includeUnverified
+        undefined
       );
       massSearchResults = undefined;
       results = true;
@@ -281,8 +316,7 @@
         Object.values(selectedStats),
         buildSocketToNodes(),
         minTotalWeight,
-        undefined,
-        !includeUnverified
+        undefined
       );
       searchResults = undefined;
       results = true;
@@ -484,8 +518,7 @@
         Object.values(selectedStats),
         buildSocketToNodes(),
         minTotalWeight,
-        filteredMarketJewels.map((j) => j.seed),
-        !includeUnverified
+        filteredMarketJewels.map((j) => j.seed)
       );
       searchResults = undefined;
       results = true;
@@ -509,8 +542,7 @@
         Object.values(selectedStats),
         affectedSkills(),
         minTotalWeight,
-        filteredMarketJewels.map((j) => j.seed),
-        !includeUnverified
+        filteredMarketJewels.map((j) => j.seed)
       );
       massSearchResults = undefined;
       results = true;
@@ -570,6 +602,34 @@
               {/if}
             </h3>
 
+            {#if !results && selectedJewel}
+              <div class="relative" use:clickOutside={() => (showSettings = false)}>
+                <button
+                  class="flex h-7 w-7 items-center justify-center rounded bg-neutral-100/10 text-gray-300 hover:bg-neutral-100/20"
+                  aria-label="Search settings"
+                  title="Search settings"
+                  onclick={() => (showSettings = !showSettings)}>
+                  ⚙
+                </button>
+                {#if showSettings}
+                  <div
+                    class="absolute left-0 top-9 z-30 w-72 rounded-md border border-white/15 bg-neutral-900/95 p-3 shadow-xl">
+                    <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Settings</div>
+                    <label class="flex cursor-pointer select-none items-start gap-2 text-sm text-gray-200">
+                      <input type="checkbox" class="mt-1" bind:checked={unseenPath} />
+                      <span>
+                        Druid Oracle (Unseen Path)
+                        <span class="mt-0.5 block text-xs text-gray-500">
+                          Include nodes only a Druid Oracle with The Unseen Path can allocate. Leave off for most
+                          characters.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
             {#if (searchResults || massSearchResults) && results}
               <div class="w-36 shrink-0">
                 <Select items={leagues} bind:value={league} on:change={updateUrl} clearable={false} />
@@ -604,15 +664,25 @@
         </div>
 
         {#if !results}
+          <div
+            class="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-gray-300">
+            <p class="mb-2">
+              <span class="font-semibold text-amber-400">Heads up:</span> unlike PoE1, PoE2 timeless jewels can't be reverse-engineered
+              — there's no deterministic formula, so every transform has to be observed in-game and recorded. This page searches
+              a community-built database.
+            </p>
+            <a
+              class="inline-flex items-center gap-1 rounded bg-amber-500/20 px-2.5 py-1 font-medium text-amber-300 hover:bg-amber-500/30"
+              href="https://github.com/Zayik/timeless-jewels/releases/latest"
+              target="_blank"
+              rel="noopener">
+              ⬇ Contribute with the capture overlay (Windows)
+            </a>
+          </div>
+
           <Select items={jewels} bind:value={selectedJewel} on:change={changeJewel} />
 
           {#if selectedJewel}
-            <label
-              class="mb-2 flex cursor-pointer select-none items-center gap-2 text-sm text-gray-300"
-              title="Community records need 2 independent contributors to be 'verified'. Enable this to also show single-source records — including ones you just recorded yourself.">
-              <input type="checkbox" bind:checked={includeUnverified} />
-              Include unverified (single-source) records
-            </label>
             <SearchConfigPanel
               {selectedJewel}
               bind:selectedConqueror
@@ -706,8 +776,18 @@
     </button>
   {/if}
 
-  <div class="text-orange-500 absolute bottom-0 right-0 m-2">
-    <a href="https://github.com/Vilsol/timeless-jewels" target="_blank" rel="noopener">Source (Github)</a>
+  <div class="absolute bottom-0 right-0 m-2 flex flex-col items-end gap-1 text-sm">
+    <a
+      class="text-amber-400 hover:text-amber-300"
+      href="https://github.com/Zayik/timeless-jewels/releases/latest"
+      target="_blank"
+      rel="noopener"
+      title="Download the PoE2 capture overlay for Windows — a contributor tool for recording what timeless jewels transform notables into. Grab the *-setup.exe on the release page.">
+      ⬇ Get the capture overlay (Windows)
+    </a>
+    <a class="text-orange-500" href="https://github.com/Vilsol/timeless-jewels" target="_blank" rel="noopener">
+      Source (Github)
+    </a>
   </div>
 </SkillTree>
 
