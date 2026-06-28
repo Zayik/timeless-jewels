@@ -35,3 +35,51 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./frontend/build
           exclude_assets: ''
+
+  # Build the Windows installer for the PoE2 capture overlay and attach it to the GitHub
+  # Release for this tag. Independent of the Pages deploy above — runs on Windows because the
+  # overlay uses Windows-only screen capture / OCR / SendInput.
+  overlay-windows:
+    name: Build overlay installer (Windows)
+    runs-on: windows-latest
+    # Only on a real version tag — on a manual workflow_dispatch github.ref_name is a branch
+    # name, which would otherwise create a stray branch-named release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: 'frontend/.nvmrc'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: overlay/src-tauri -> target
+
+      - name: Install overlay deps
+        working-directory: overlay
+        run: pnpm install
+
+      # Regenerate the tree-derived JSON the build imports (poe2_sockets / _socket_graphs /
+      # _vocab / _desecrated) from the committed game data, so a clean checkout always builds.
+      - name: Generate tree data
+        working-directory: overlay
+        run: pnpm extract
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: overlay
+          tagName: ${{ github.ref_name }}
+          releaseName: 'PoE2 Jewel Overlay ${{ github.ref_name }}'
+          releaseBody: 'Windows installer for the PoE2 timeless-jewel capture overlay (contributor tool). Download the `*-setup.exe` below and run it. See overlay/README.md for usage.'
+          releaseDraft: false
+          prerelease: false
