@@ -7,6 +7,8 @@ mod ring;
 use ocr::OcrLine;
 use ring::{detect, Jewel};
 use serde::{Deserialize, Serialize};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -528,6 +530,131 @@ fn capture_and_detect(
     }))
 }
 
+// The glow is probed in GLOW_ANGLES directions around the node, each at several radial multiples of
+// icon_r (the halo sits at the icon edge and fades outward). A direction counts as "lit" if ANY of
+// its radii hits a glow pixel; the node is highlighted when most directions are lit.
+const GLOW_ANGLES: usize = 16;
+const GLOW_RADII: [f64; 4] = [0.8, 1.0, 1.2, 1.45];
+// Fraction of directions that must show glow. The search halo is radially symmetric (~all
+// directions), whereas a jewel-ring spoke or a one-sided green sunburst lights only ~1-2. Measured:
+// a real lit node covers 16/16 directions, while spokes, coloured sunbursts and unlit nodes all
+// cover <=1/16 — so 0.6 sits in a very wide gap.
+const GLOW_COVERAGE_MIN: f64 = 0.6;
+
+/// A "glow" pixel: near-grey (channels close together) and clearly above the dark tree background.
+/// The PoE2 search highlight is a soft WHITE-GREY halo around the matched node — bright *relative* to
+/// the ~15-value background but only ~80-130 in absolute terms, so an absolute near-255 white test
+/// (the original approach) misses it. The grey requirement (small channel spread) rejects coloured
+/// tree art — green allocation glows and gold/green jewel-ring spokes — though a blown-out spoke core
+/// can still read grey, which is why the caller also requires radial symmetry (a spoke is a stripe).
+fn is_glow_px(r: i32, g: i32, b: i32) -> bool {
+    let mx = r.max(g).max(b);
+    let mn = r.min(g).min(b);
+    r > 55 && g > 55 && b > 55 && (mx - mn) < 40
+}
+
+/// True if the node centred at (`cx`,`cy`) in physical px carries the search-highlight halo: a
+/// grey glow is present in at least `GLOW_COVERAGE_MIN` of the directions around it (sampled at
+/// several radii spanning the icon edge). Requiring glow in MOST directions is what separates the
+/// radially-symmetric highlight from a bright spoke or a one-sided sunburst that only lights a
+/// couple of directions. Robust to a few px of pose error and to icon_r being slightly off (a
+/// direction is lit if any of its radii hits the halo). `icon_r` is the on-screen node-icon radius
+/// in px (JS derives it from the locked ring radius × zoom).
+fn glow_at(buf: &[u8], w: usize, h: usize, cx: f64, cy: f64, icon_r: f64) -> bool {
+    use std::f64::consts::PI;
+    if icon_r < 3.0 {
+        return false;
+    }
+    let is_glow = |px: f64, py: f64| -> Option<bool> {
+        let (ix, iy) = (px.round() as i64, py.round() as i64);
+        if ix < 0 || iy < 0 || ix as usize >= w || iy as usize >= h {
+            return None;
+        }
+        let i = (iy as usize * w + ix as usize) * 4;
+        Some(is_glow_px(buf[i] as i32, buf[i + 1] as i32, buf[i + 2] as i32))
+    };
+    let (mut lit, mut on_screen) = (0usize, 0usize);
+    for k in 0..GLOW_ANGLES {
+        let a = 2.0 * PI * k as f64 / GLOW_ANGLES as f64;
+        let (c, s) = (a.cos(), a.sin());
+        let mut any_sample = false;
+        let mut any_glow = false;
+        for &m in &GLOW_RADII {
+            let r = icon_r * m;
+            if let Some(g) = is_glow(cx + r * c, cy + r * s) {
+                any_sample = true;
+                any_glow |= g;
+            }
+        }
+        if any_sample {
+            on_screen += 1;
+        }
+        if any_glow {
+            lit += 1;
+        }
+    }
+    // Need most directions on-screen (reject a node hanging off the frame edge) and most of them lit.
+    on_screen >= GLOW_ANGLES * 3 / 4 && (lit as f64 / GLOW_ANGLES as f64) >= GLOW_COVERAGE_MIN
+}
+
+/// True if the captured frame still shows THIS overlay's own drawing. The overlay draws its target
+/// ring in mask-safe ORANGE (#ff7733) and the hover ring in MAGENTA (#ff44dd) — colours deliberately
+/// absent from the game (see the .node.target CSS note). Their presence means the overlay window
+/// hadn't been cleared/presented when the capture ran (the capture raced the compositor). Crucially,
+/// the overlay's white "to-do" node circles — which composite to a grey ring that mimics the search
+/// halo and cause false glows — are drawn exactly when a target (orange) is, so orange is a reliable
+/// proxy for "the interfering markers are on screen". Subsampled; a handful of pixels is enough.
+fn frame_has_overlay(buf: &[u8], w: usize, h: usize) -> bool {
+    let is_orange = |r: i32, g: i32, b: i32| r > 225 && (95..=150).contains(&g) && b < 80;
+    let is_magenta = |r: i32, g: i32, b: i32| r > 225 && g < 110 && b > 190;
+    let mut count = 0usize;
+    let mut y = 0usize;
+    while y < h {
+        let row = y * w * 4;
+        let mut x = 0usize;
+        while x < w {
+            let i = row + x * 4;
+            let (r, g, b) = (buf[i] as i32, buf[i + 1] as i32, buf[i + 2] as i32);
+            if is_orange(r, g, b) || is_magenta(r, g, b) {
+                count += 1;
+                if count >= 15 {
+                    return true;
+                }
+            }
+            x += 4;
+        }
+        y += 4;
+    }
+    false
+}
+
+/// Capture the primary monitor and report, for each candidate screen position (physical px), whether
+/// that node has the search-highlight halo (see `glow_at`). `icon_r` is the expected node-icon radius
+/// in px (the JS side derives it from the locked ring radius × zoom). The JS side hides the overlay
+/// before calling, but the OS capture can race the compositor and still grab a frame with the overlay
+/// drawn — whose white "to-do" node rings read as grey halos and light up nearly every node. So we
+/// re-capture until the overlay sentinel (`frame_has_overlay`) is gone, then detect on that clean
+/// frame. This is the core of the search-sweep capture method.
+#[tauri::command]
+fn detect_glow(positions: Vec<[f64; 2]>, icon_r: f64) -> Result<Vec<bool>, String> {
+    let (mut frame, mut w, mut h) = capture_primary()?;
+    for _ in 0..8 {
+        if !frame_has_overlay(&frame, w as usize, h as usize) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        let cap = capture_primary()?;
+        frame = cap.0;
+        w = cap.1;
+        h = cap.2;
+    }
+    let (wu, hu) = (w as usize, h as usize);
+    Ok(positions
+        .iter()
+        .map(|p| glow_at(&frame, wu, hu, p[0], p[1], icon_r))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,6 +733,58 @@ mod tests {
         assert!((at(2, 1) - 1.0).abs() < 1e-4, "orthogonal = 3/3");
         assert!((at(1, 1) - 4.0 / 3.0).abs() < 1e-4, "diagonal = 4/3");
         assert!((at(2, 0) - 2.0).abs() < 1e-4, "two orthogonal = 6/3");
+    }
+
+    #[test]
+    fn glow_at_detects_grey_halo_not_colour() {
+        // Build an RGBA frame; `paint(d)` decides which pixels (at tree-distance d from the node
+        // centre) get the given colour, the rest stay dark background (value 12).
+        let (w, h) = (200usize, 200usize);
+        let (cx, cy, icon_r) = (100.0f64, 100.0f64, 20.0f64);
+        let make = |paint: &dyn Fn(f64) -> bool, col: [u8; 3]| {
+            let mut buf = vec![12u8; w * h * 4]; // dark background
+            for y in 0..h {
+                for x in 0..w {
+                    let d = ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt();
+                    if paint(d) {
+                        let i = (y * w + x) * 4;
+                        buf[i] = col[0];
+                        buf[i + 1] = col[1];
+                        buf[i + 2] = col[2];
+                    }
+                }
+            }
+            buf
+        };
+        // A grey halo around the node (~the real search highlight, ~100/channel), present in all
+        // directions → lit.
+        let halo = make(&|d| d <= icon_r * 2.0, [100, 100, 100]);
+        assert!(glow_at(&halo, w, h, cx, cy, icon_r), "grey halo should be detected");
+        // Robust to a few px of pose error: same halo, centre off by 8px → still lit.
+        assert!(glow_at(&halo, w, h, cx + 8.0, cy, icon_r), "off-by-8px halo should still detect");
+        // A SATURATED bright disc (green allocation glow / gold spoke) → rejected (not grey).
+        let green = make(&|d| d <= icon_r * 2.0, [80, 210, 90]);
+        assert!(!glow_at(&green, w, h, cx, cy, icon_r), "coloured bright art must be rejected");
+        // A one-sided stripe through the node (a jewel-ring spoke) lights only ~2 directions → rejected.
+        let stripe = make(&|_| false, [0, 0, 0]);
+        let mut stripe = stripe;
+        for y in 0..h {
+            for x in 0..w {
+                // a 10px-wide diagonal band of grey across the node
+                if ((x as f64 - cx) - (y as f64 - cy)).abs() <= 5.0 {
+                    let i = (y * w + x) * 4;
+                    stripe[i] = 110;
+                    stripe[i + 1] = 110;
+                    stripe[i + 2] = 110;
+                }
+            }
+        }
+        assert!(!glow_at(&stripe, w, h, cx, cy, icon_r), "a one-sided spoke stripe must be rejected");
+        // Dark background only → not lit.
+        let empty = make(&|_| false, [0, 0, 0]);
+        assert!(!glow_at(&empty, w, h, cx, cy, icon_r), "dark node → not lit");
+        // Node off the right edge → too few in-bounds samples → not lit.
+        assert!(!glow_at(&halo, w, h, (w as f64) + 5.0, cy, icon_r), "off-screen node → not lit");
     }
 
     #[test]
@@ -792,6 +971,61 @@ async fn fetch_consensus(worker_url: String, jewel: String, seed: u32) -> Result
     Ok(text)
 }
 
+/// Type a search string into whatever window currently has focus — used to drive the in-game
+/// passive-tree search during an auto-sweep. The contributor clicks the search box once (so PoE2
+/// holds keyboard focus); the click-through, no-activate overlay never steals it, so these
+/// synthetic keystrokes land in the game. First clears the field (Ctrl+A then Delete), then types
+/// `text` as Unicode (KEYEVENTF_UNICODE) so arbitrary characters — apostrophes in names like
+/// "Mercenary's Lot" — type correctly regardless of keyboard layout. The whole sequence is one
+/// SendInput batch (atomic w.r.t. other input). NOTE: this is opt-in (an explicit sweep hotkey),
+/// never automatic — the contributor must focus the search box first or the keystrokes hit the game.
+#[tauri::command]
+fn type_search(text: String) -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_A, VK_CONTROL, VK_DELETE,
+    };
+    fn vk(code: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT { wVk: code, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
+            },
+        }
+    }
+    fn unicode(unit: u16, up: bool) -> INPUT {
+        let flags = if up { KEYEVENTF_UNICODE | KEYEVENTF_KEYUP } else { KEYEVENTF_UNICODE };
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT { wVk: VIRTUAL_KEY(0), wScan: unit, dwFlags: flags, time: 0, dwExtraInfo: 0 },
+            },
+        }
+    }
+    let down = KEYBD_EVENT_FLAGS(0);
+    let mut inputs: Vec<INPUT> = Vec::with_capacity(text.len() * 2 + 6);
+    // Clear the field: Ctrl+A (select all) then Delete.
+    inputs.push(vk(VK_CONTROL, down));
+    inputs.push(vk(VK_A, down));
+    inputs.push(vk(VK_A, KEYEVENTF_KEYUP));
+    inputs.push(vk(VK_CONTROL, KEYEVENTF_KEYUP));
+    inputs.push(vk(VK_DELETE, down));
+    inputs.push(vk(VK_DELETE, KEYEVENTF_KEYUP));
+    // Type the text as UTF-16 code units (down+up per unit).
+    for u in text.encode_utf16() {
+        inputs.push(unicode(u, false));
+        inputs.push(unicode(u, true));
+    }
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize != inputs.len() {
+        return Err(format!(
+            "SendInput delivered {sent}/{} events — input may be blocked (run PoE2 and the overlay at the same privilege level).",
+            inputs.len()
+        ));
+    }
+    Ok(())
+}
+
 /// Copy the recorded transforms (serialised by the frontend) to the OS clipboard so the
 /// contributor can paste a submission-ready batch. Uses arboard (already a dependency)
 /// because the click-through overlay window can't reach navigator.clipboard.
@@ -802,9 +1036,22 @@ fn export_records(json: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Command form of `save_debug_capture` — invoked from the webview AFTER it has hidden the
+/// overlay's own drawing, so the dumped frame shows only the game (no overlay markers polluting
+/// the search-highlight signal). Returns the saved PNG path.
+#[tauri::command]
+fn save_capture() -> Result<String, String> {
+    save_debug_capture()
+}
+
 /// Debug: save a raw primary-monitor capture to a PNG so detection masks can be
-/// tuned against the user's real graphics settings. Returns the saved path.
+/// tuned against the user's real graphics settings. Returns the saved path. Each call writes a
+/// fresh, incrementing filename (poe2_capture_0.png, _1.png, …) so successive dumps DON'T overwrite
+/// each other — letting a contributor capture a matched set (e.g. a no-search baseline then a
+/// search-highlight frame) for the maintainer to diff.
 fn save_debug_capture() -> Result<String, String> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static SEQ: AtomicU32 = AtomicU32::new(0);
     let _guard = CAPTURE_LOCK.lock().map_err(|_| "capture lock poisoned")?;
     let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
     let monitor = monitors
@@ -812,10 +1059,55 @@ fn save_debug_capture() -> Result<String, String> {
         .find(|m| m.is_primary())
         .ok_or("no primary monitor")?;
     let img = monitor.capture_image().map_err(|e| e.to_string())?;
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let mut path = std::env::temp_dir();
-    path.push("poe2_overlay_capture.png");
+    path.push(format!("poe2_capture_{n}.png"));
     img.save(&path).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Tray menu items we mutate at runtime — the show/hide entry's label flips with the window's
+/// visibility ("Hide overlay" while shown, "Show overlay" while parked in the tray). Managed as
+/// app state so both the tray-icon handlers and the JS-invoked commands can reach it.
+struct TrayItems {
+    toggle: MenuItem<tauri::Wry>,
+}
+
+/// Show or hide the transparent always-on-top draw layer and keep the tray's toggle label in
+/// sync. Hiding parks the tool in the system tray without quitting; the tray icon (left-click or
+/// "Show overlay") brings it back. The global hotkeys keep working while hidden, but nothing is
+/// drawn until it's shown again.
+fn set_overlay_visible(app: &tauri::AppHandle, visible: bool) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = if visible { win.show() } else { win.hide() };
+    }
+    if let Some(items) = app.try_state::<TrayItems>() {
+        let _ = items
+            .toggle
+            .set_text(if visible { "Hide overlay" } else { "Show overlay" });
+    }
+}
+
+/// Flip the overlay between shown and hidden (tray left-click / "Show ⇄ Hide overlay" menu item).
+fn toggle_overlay(app: &tauri::AppHandle) {
+    let visible = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(true);
+    set_overlay_visible(app, !visible);
+}
+
+/// Hide the overlay to the system tray — the panel drop-down's "Hide to tray". Restore it from
+/// the tray icon. Distinct from quitting: the process keeps running so hotkeys stay registered.
+#[tauri::command]
+fn hide_window(app: tauri::AppHandle) {
+    set_overlay_visible(&app, false);
+}
+
+/// Quit the whole app — the panel drop-down's "Quit" and the tray "Quit".
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 fn main() {
@@ -832,8 +1124,22 @@ fn main() {
     let dump_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
     let prev_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::BracketLeft);
     let next_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::BracketRight);
+    // Ctrl+Shift+G: glow probe — with a name already typed in the tree search, light up which
+    // in-radius nodes the game is highlighting (manual / debug check of the detector).
+    let glow_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyG);
+    // Ctrl+Shift+A: auto-sweep — type every result-notable name into the tree search in turn and
+    // record which base nodes light up. The contributor focuses the search box first.
+    let sweep_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyA);
+    // Ctrl+Shift+D: skip the hovered node — a desecrated transform whose default can't be read.
+    let skip_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyD);
 
     tauri::Builder::default()
+        // Single-instance must be registered first: a second launch hands its args to this
+        // callback (in the already-running process) instead of starting over — we just bring
+        // the overlay back into view rather than letting a duplicate spawn.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            set_overlay_visible(app, true);
+        }))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, sc, event| {
@@ -845,24 +1151,29 @@ fn main() {
                     } else if sc == &recal_key {
                         let _ = app.emit("recalibrate", ());
                     } else if sc == &dump_key {
-                        match save_debug_capture() {
-                            Ok(p) => {
-                                let _ = app.emit("debug-capture", p);
-                            }
-                            Err(e) => {
-                                let _ = app.emit("debug-capture", format!("ERROR: {e}"));
-                            }
-                        }
+                        // Let the webview hide its own overlay drawing first, then call
+                        // save_capture — so the dumped frame is the clean game screen (no overlay
+                        // markers polluting the search-highlight signal we're tuning against).
+                        let _ = app.emit("request-dump", ());
                     } else if sc == &prev_key {
                         let _ = app.emit("socket-cycle", -1i32);
                     } else if sc == &next_key {
                         let _ = app.emit("socket-cycle", 1i32);
+                    } else if sc == &glow_key {
+                        let _ = app.emit("debug-glow", ());
+                    } else if sc == &sweep_key {
+                        let _ = app.emit("auto-sweep", ());
+                    } else if sc == &skip_key {
+                        let _ = app.emit("skip-node", ());
                     }
                 })
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
             capture_and_detect,
+            detect_glow,
+            type_search,
+            save_capture,
             get_cursor,
             set_click_through,
             read_jewel,
@@ -870,15 +1181,76 @@ fn main() {
             ocr_region,
             export_records,
             submit_observations,
-            fetch_consensus
+            fetch_consensus,
+            hide_window,
+            quit_app
         ])
         .setup(move |app| {
+            // --- system tray ---------------------------------------------------------------
+            // The overlay window is transparent, borderless and skips the taskbar, so the tray
+            // icon is its home: left-click toggles show/hide; the menu adds Recalibrate and Quit.
+            let toggle_item =
+                MenuItem::with_id(app, "toggle_overlay", "Hide overlay", true, None::<&str>)?;
+            let recal_item = MenuItem::with_id(
+                app,
+                "recalibrate",
+                "Recalibrate",
+                true,
+                Some("Ctrl+Shift+R"),
+            )?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(
+                app,
+                &[
+                    &toggle_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &recal_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &quit_item,
+                ],
+            )?;
+            app.manage(TrayItems {
+                toggle: toggle_item.clone(),
+            });
+            let _tray = TrayIconBuilder::with_id("overlay-tray")
+                .tooltip("PoE2 Jewel Overlay")
+                .icon(
+                    app.default_window_icon()
+                        .cloned()
+                        .ok_or("no default window icon to use for the tray")?,
+                )
+                .menu(&tray_menu)
+                // Left-click toggles visibility instead of opening the menu (set below).
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "toggle_overlay" => toggle_overlay(app),
+                    "recalibrate" => {
+                        let _ = app.emit("recalibrate", ());
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        toggle_overlay(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
             let gs = app.global_shortcut();
             gs.register(toggle_key)?;
             gs.register(recal_key)?;
             gs.register(dump_key)?;
             gs.register(prev_key)?;
             gs.register(next_key)?;
+            gs.register(glow_key)?;
+            gs.register(sweep_key)?;
+            gs.register(skip_key)?;
             if let Some(win) = app.get_webview_window("main") {
                 // Click-through by default: the overlay never intercepts input, so it can't
                 // lock the screen or steal focus from the game. The frontend flips this off

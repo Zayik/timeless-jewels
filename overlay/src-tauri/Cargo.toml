@@ -9,8 +9,13 @@ rust-version = "1.77"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tray-icon: the overlay lives in the system tray (Show/Hide, Recalibrate, Quit) since the
+# transparent click-through window has no title bar and stays out of the taskbar.
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
+# Single-instance: a second launch surfaces the running overlay instead of spawning a
+# duplicate window + tray icon (the global hotkeys would otherwise double-fire).
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Cross-platform screen capture. Pin loosely; adjust to the latest if resolution fails.
@@ -36,6 +41,9 @@ features = [
   # GetClipboardSequenceNumber — detects a deliberate Ctrl+C even when the copied text is
   # byte-identical to what was already on the clipboard (a raw text diff would miss that).
   "Win32_System_DataExchange",
+  # SendInput — type each result-notable name into the in-game tree search during an auto-sweep
+  # (the keystrokes go to the focused PoE2 window; the overlay never takes focus).
+  "Win32_UI_Input_KeyboardAndMouse",
 ]
 
 [dev-dependencies]
@@ -52,6 +60,17 @@ opt-level = 3
 # Same reason for the (ignored) acquire benchmark under the test profile.
 [profile.test]
 opt-level = 3
+
+# Compile ONLY this crate as a single codegen unit (deps keep building in parallel). At
+# opt-level 3 with the default 256 units, an internalized `#[inline]` generic from a dependency
+# (serde_json's `invalid_type`, instantiated via url::Url's Deserialize inside the
+# tauri::generate_context!-expanded config code) gets referenced from one of our crate's objects
+# while its definition lands in a different unit → `LNK2019: unresolved external symbol` at the
+# final bin link (cargo check and the test harness don't hit it, only the bin link does). One unit
+# keeps definition + reference together. Scoped to this package so a clean build of the heavy deps
+# (tauri/reqwest/windows) stays parallel; the release profile already sets codegen-units = 1 globally.
+[profile.dev.package.poe2-jewel-overlay]
+codegen-units = 1
 
 [profile.release]
 panic = "abort"

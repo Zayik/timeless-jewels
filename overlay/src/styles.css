@@ -44,6 +44,84 @@ body {
   cursor: grabbing;
 }
 
+/* Titled header row: app name on the left, the window-controls (⋮) button on the right. */
+#panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+#panelHead .title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #cfcfcf;
+}
+
+/* Window-controls button (⋮) and its drop-down: Hide to tray · Recalibrate · Quit. */
+#menuBtn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cfcfcf;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+#menuBtn:hover,
+#menuBtn.open {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.menu {
+  position: absolute;
+  top: 38px;
+  right: 12px;
+  min-width: 150px;
+  padding: 4px;
+  background: rgba(28, 28, 34, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  z-index: 30;
+  cursor: default;
+}
+.menu.hidden {
+  display: none;
+}
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: transparent;
+  color: #e8e8e8;
+  border: none;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.menu-item.danger {
+  color: var(--warn);
+}
+.menu-item.danger:hover {
+  background: rgba(255, 138, 91, 0.16);
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
 #panel h1 {
   font-size: 15px;
   margin: 0 0 10px;
@@ -220,6 +298,12 @@ body {
   stroke: #b07cff;
   stroke-dasharray: 4 4;
 }
+/* Skipped (desecrated — default transform unrecordable). Dim grey, dashed, so it reads as
+   "handled, not captured" and stays clear of the green "done" and violet community states. */
+#layer .node.skipped {
+  stroke: rgba(160, 160, 160, 0.55);
+  stroke-dasharray: 3 5;
+}
 /* Target/hover use mask-SAFE colours (orange + magenta): the overlay is composited
    into the screen capture, so any cyan/gold highlight near the ring would be picked
    up by the blue/green ring masks and bias the fit (a feedback loop). These hues sit
@@ -259,4 +343,11 @@ body {
   fill: #ff7733;
   font-size: 13px;
   font-weight: 700;
+}
+/* Glow probe (search-sweep): nodes the in-game tree search is currently highlighting with a
+   white ring. Magenta is mask-safe (see the .node.target note). */
+#layer .glow {
+  fill: rgba(255, 68, 221, 0.18);
+  stroke: #ff44dd;
+  stroke-width: 4;
 }

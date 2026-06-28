@@ -11,6 +11,20 @@ the website. This tool is intentionally separate and optional.
 > vocabulary, and **auto-syncs** the transform to the community DB in the background
 > (clipboard export with Ctrl+Shift+E remains as a manual fallback).
 
+## Install (no build needed)
+
+Most contributors don't need to build anything — grab the installer:
+
+1. Go to the [latest release](https://github.com/Zayik/timeless-jewels/releases/latest).
+2. Download the **`PoE2 Jewel Overlay_<version>_x64-setup.exe`** and run it (it installs per-user,
+   so no administrator prompt). You can also reach this from the website's PoE2 page via
+   **"Get the capture overlay (Windows)"**.
+3. Launch **PoE2 Jewel Overlay** from the Start menu. It lives in the **system tray** — left-click
+   the tray icon to show/hide, right-click for *Recalibrate* / *Quit*, or use the panel's **⋮** menu.
+
+Windows SmartScreen may warn that the installer is from an unknown publisher (it's unsigned) —
+choose *More info → Run anyway*. The rest of this README is for people building from source.
+
 ## How it works
 
 The socketed jewel draws its **radius ring** on the passive tree (green/yellow for
@@ -82,12 +96,30 @@ pnpm app              # tauri dev: launches vite + the overlay window
 Build a distributable:
 
 ```bash
-pnpm app:build        # tauri build -> installer in src-tauri/target/release/bundle
+pnpm app:build        # tauri build -> NSIS installer in
+                      # src-tauri/target/release/bundle/nsis/*-setup.exe
 ```
+
+Releases are automated: pushing a `v*` tag runs `.github/workflows/release.yml`, which builds
+this installer on Windows and attaches it to the GitHub Release for the tag (alongside the PoE1
+site deploy). To regenerate the app icon, run `python scripts/make_icon.py && npx tauri icon app-icon.png`.
+
+## Window controls
+
+The overlay has no title bar (it's a transparent always-on-top draw layer), so it's controlled
+two ways:
+
+- **System tray icon** (next to the clock): **left-click** toggles the overlay shown/hidden; the
+  **right-click menu** has *Show/Hide overlay*, *Recalibrate*, and *Quit*.
+- **The ⋮ button** on the panel header: a drop-down with *Hide to tray*, *Recalibrate*, and *Quit*.
+
+"Hide to tray" parks the tool without quitting (global hotkeys keep working; nothing is drawn
+until you show it again from the tray). "Quit" closes it completely.
 
 ## Using it
 
-1. Launch the overlay (it is always click-through; the panel top-left is informational).
+1. Launch the overlay (it is always click-through; the panel top-left is informational). Use the
+   ⋮ menu or the tray icon to hide it to the tray or quit.
 2. Open the passive tree in PoE2 with the jewel socketed; zoom/pan so the gold socket
    frame is clearly visible (no tooltip over it).
 3. Press **Ctrl+Shift+X** to calibrate. The jewel type and socket are auto-detected and
@@ -129,6 +161,9 @@ throttle; the `catalog_consensus` view aggregates distinct contributors. See
 | `Ctrl+Shift+E` | Export recorded transforms to the clipboard (submission-ready JSON) |
 | `Ctrl+Shift+[` / `]` | Cycle the active socket (correct a wrong auto-detect) |
 | `Ctrl+Shift+S` | Dump a raw screen capture (for detector tuning) |
+
+Mouse: the **tray icon** (left-click toggles show/hide; right-click for the menu) and the panel's
+**⋮ menu** (Hide to tray · Recalibrate · Quit) cover the non-recording window controls.
 
 The result-notable vocabulary OCR is matched against lives in `src/poe2_vocab.json`,
 generated from the main repo's PoE2 data by `pnpm extract` (or `pnpm extract:vocab`).
