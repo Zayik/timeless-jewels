@@ -366,3 +366,14 @@ export interface TargetedMassMarketSearchConfig {
   stats: StatConfig[];
   minTotalWeight: number;
 }
+
+export {
+  constructQuery,
+  constructQueries,
+  openQuery,
+  openTrade,
+  seedsPerQuery,
+  tradeStatNames,
+  tradeUrl
+} from './trade';
+export type { TradeQuery } from './trade';

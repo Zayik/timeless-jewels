@@ -23,13 +23,73 @@ function manipulateBravo(v: number): number {
 export class NumberGenerator {
   state: [number, number, number, number] = [0, 0, 0, 0];
 
-  Reset(passiveSkillGraphID: number, seed: number): void {
+  // The seeded state is a pure function of (graph id, jewel seed), and the calculator asks
+  // for the same pair twice in a row on every notable: isPassiveSkillReplaced reseeds to
+  // roll the replacement chance, then replacePassiveSkill reseeds to the identical state.
+  // Reset is the most expensive operation here, so the second one is memoised.
+  private seededGraphID = -1;
+  private seededSeed = -1;
+  private seededState: [number, number, number, number] = [0, 0, 0, 0];
+
+  // Abyss jewels draw bounded values like MSVC's _Rng_from_urng (rejecting the biased tail);
+  // legion jewels keep plain modulo, which is what PoB's legion LUTs were generated with.
+  private msvcDraw = false;
+
+  Reset(passiveSkillGraphID: number, seed: number, msvcDraw = false): void {
+    const graphID = passiveSkillGraphID >>> 0;
+    const s = seed >>> 0;
+
+    // Before the memo check: the key omits the jewel type, so a hit may come from the other mode.
+    this.msvcDraw = msvcDraw;
+
+    if (this.seededGraphID === graphID && this.seededSeed === s) {
+      this.state[0] = this.seededState[0];
+      this.state[1] = this.seededState[1];
+      this.state[2] = this.seededState[2];
+      this.state[3] = this.seededState[3];
+      return;
+    }
+
     this.state[0] = InitialStateConstant0;
     this.state[1] = InitialStateConstant1;
     this.state[2] = InitialStateConstant2;
     this.state[3] = InitialStateConstant3;
 
-    this.Initialize([passiveSkillGraphID >>> 0, seed >>> 0]);
+    this.Initialize([graphID, s]);
+
+    this.seededGraphID = graphID;
+    this.seededSeed = s;
+    this.seededState = [this.state[0], this.state[1], this.state[2], this.state[3]];
+  }
+
+  // Seeds from a graph id and jewel seed like Reset, in the Abyss MSVC draw mode, for the walk
+  // that picks which passives a socket-keyed Abyss jewel conquers. It leaves Reset's memo alone.
+  ResetAbyss(graphID: number, seed: number): void {
+    this.msvcDraw = true;
+
+    this.state[0] = InitialStateConstant0;
+    this.state[1] = InitialStateConstant1;
+    this.state[2] = InitialStateConstant2;
+    this.state[3] = InitialStateConstant3;
+
+    this.Initialize([graphID >>> 0, seed >>> 0]);
+  }
+
+  // Seeds from the jewel seed alone with the reference tinymt32_init (no period certification),
+  // as Zorath's ascendancy pick does; bounded draws take the Abyss MSVC mode.
+  ResetSingle(seed: number): void {
+    this.msvcDraw = true;
+
+    this.state = [seed >>> 0, 0x8f7011ee, 0xfc78ff1f, 0x3793fdff];
+    for (let i = 1; i < 8; i++) {
+      const prev = this.state[(i - 1) & 3];
+      const mixed = (i + Math.imul(1812433253, (prev ^ (prev >>> 30)) >>> 0)) >>> 0;
+      this.state[i & 3] = (this.state[i & 3] ^ mixed) >>> 0;
+    }
+
+    for (let i = 0; i < 8; i++) {
+      this.GenerateNextState();
+    }
   }
 
   Initialize(seeds: number[]): void {
@@ -125,7 +185,26 @@ export class NumberGenerator {
   }
 
   GenerateSingle(exclusiveMaximumValue: number): number {
+    if (this.msvcDraw) {
+      return this.generateSingleMSVC(exclusiveMaximumValue >>> 0);
+    }
     return (this.GenerateUInt() % exclusiveMaximumValue) >>> 0;
+  }
+
+  // MSVC STL's _Rng_from_urng::operator() for a 32-bit engine (stl/inc/xutility): no draw at
+  // all for n <= 1, otherwise redraw while v lands in the tail past the last whole multiple of n.
+  private generateSingleMSVC(n: number): number {
+    if (n <= 1) {
+      return 0;
+    }
+    const limit = Math.floor(0xffffffff / n);
+    const lastFits = 0xffffffff % n === n - 1;
+    for (;;) {
+      const v = this.GenerateUInt();
+      if (Math.floor(v / n) < limit || lastFits) {
+        return v % n;
+      }
+    }
   }
 
   GenerateSigned(minValue: number, maxValue: number): number {

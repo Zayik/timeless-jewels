@@ -5,7 +5,8 @@
   import { goto } from '$app/navigation';
   import type { Node } from '../lib/skill_tree_types';
   import { getAffectedNodes, skillTree, translateStat } from '../lib/skill_tree';
-  import { openTrade } from '../lib/trade';
+  import { constructQueries, openQuery, seedsPerQuery } from '../lib/trade';
+  import type { TradeQuery } from '../lib/trade';
   import { syncWrap } from '../lib/worker';
   import { proxy } from 'comlink';
   import type {
@@ -61,12 +62,24 @@
       : undefined
   );
 
+  // The conqueror only ever changes the keystone, so a stat search that skips
+  // keystones gives identical results for all of them. "Any" exploits that to
+  // build trade links matching every conqueror at once.
+  const ANY_CONQUEROR = 'Any';
+  const conquerorItems = $derived(
+    conquerors.length > 1 ? [...conquerors, { value: ANY_CONQUEROR, label: ANY_CONQUEROR }] : conquerors
+  );
+  const isAnyConqueror = $derived(selectedConqueror?.value === ANY_CONQUEROR && conquerors.length > 1);
+  // The conqueror handed to the calculator: under "Any" every conqueror rolls the
+  // same non-keystone passives, so the first one stands in for all of them.
+  const calcConqueror = $derived(isAnyConqueror ? conquerors[0]?.value : selectedConqueror?.value);
+
   // Conqueror is de-emphasized (its picker lives under the Market section), so
   // keep a sensible default selected for the chosen jewel. This keeps search,
   // trade URLs, and the seed preview working without the user opening Market.
   $effect(() => {
     if (selectedJewel && conquerors.length > 0) {
-      const valid = conquerors.some((c) => c.value === selectedConqueror?.value);
+      const valid = conquerorItems.some((c) => c.value === selectedConqueror?.value);
       if (!valid) {
         selectedConqueror = conquerors[0];
       }
@@ -86,19 +99,16 @@
   const seedResults = $derived(
     !seed ||
       !selectedJewel ||
-      !selectedConqueror ||
-      Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).indexOf(selectedConqueror.value) < 0
+      !calcConqueror ||
+      Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).indexOf(calcConqueror) < 0
       ? []
       : affectedNodes
           .filter((n) => !!data.TreeToPassive[n.skill])
+          // Under "Any" the keystone depends on which conqueror it is, so it is left out.
+          .filter((n) => !isAnyConqueror || !n.isKeystone)
           .map((n) => ({
             node: n.skill,
-            result: calculator.Calculate(
-              data.TreeToPassive[n.skill].Index,
-              seed,
-              selectedJewel.value,
-              selectedConqueror.value
-            )
+            result: calculator.Calculate(data.TreeToPassive[n.skill].Index, seed, selectedJewel.value, calcConqueror)
           }))
   );
 
@@ -181,7 +191,8 @@
   let seedsProcessed = $state(0);
   let activeSocketsCount = $state(1);
   let searchJewel = $state(1);
-  let searchConqueror = $state('');
+  // null means "any conqueror" — see constructQuery in trade.ts
+  let searchConqueror = $state<string | null>('');
   let massSearchResults = $state<MassSearchResults | undefined>(undefined);
 
   const totalSeeds = () => {
@@ -223,13 +234,56 @@
     return [];
   });
 
+  // "Legacy" restricts trade links to online sellers; the default ("All Traders")
+  // also shows offline/merchant listings.
+  const readTradersMode = () => {
+    try {
+      return localStorage.getItem('tradersMode') === 'legacy';
+    } catch {
+      return false;
+    }
+  };
+  let isLegacyTradersMode = $state(readTradersMode());
+  $effect(() => {
+    try {
+      localStorage.setItem('tradersMode', isLegacyTradersMode ? 'legacy' : 'modern');
+    } catch {
+      // storage unavailable; the toggle still works for this visit
+    }
+  });
+
+  // A trade link holds a limited number of seeds, so a large result set is
+  // spread over several links rather than being truncated.
+  let showTradeLinks = $state(false);
+  const tradeQueries = $derived.by<TradeQuery[]>(() => {
+    if (tradeResults.length === 0) {
+      return [];
+    }
+    try {
+      return constructQueries(searchJewel, searchConqueror, tradeResults, isLegacyTradersMode);
+    } catch (err) {
+      console.error('[trade] cannot build trade links:', err);
+      return [];
+    }
+  });
+  const tradeBatchSize = $derived(seedsPerQuery(searchJewel, searchConqueror));
+  $effect(() => {
+    if (tradeQueries.length < 2) {
+      showTradeLinks = false;
+    }
+  });
+
+  // Keystones are the only conqueror-dependent passives, so under "Any" they are
+  // dropped from searches and any conqueror then yields the same rolls.
+  const searchableNode = (n: Node) => !isAnyConqueror || !n.isKeystone;
+
   const search = () => {
     if (!circledNode) {
       return;
     }
 
     searchJewel = selectedJewel.value;
-    searchConqueror = selectedConqueror.value;
+    searchConqueror = isAnyConqueror ? null : selectedConqueror.value;
     searching = true;
     searchResults = undefined;
     massSearchResults = undefined;
@@ -238,9 +292,10 @@
 
     const query: ReverseSearchConfig = {
       jewel: selectedJewel.value,
-      conqueror: selectedConqueror.value,
+      conqueror: calcConqueror,
       nodes: affectedNodes
         .filter((n) => !disabled.has(n.skill))
+        .filter(searchableNode)
         .map((n) => data.TreeToPassive[n.skill])
         .filter((n) => !!n)
         .map((n) => n.Index),
@@ -268,7 +323,7 @@
     }
 
     searchJewel = selectedJewel.value;
-    searchConqueror = selectedConqueror.value;
+    searchConqueror = isAnyConqueror ? null : selectedConqueror.value;
     searching = true;
     massSearchResults = undefined;
     searchResults = undefined;
@@ -282,7 +337,9 @@
       .map((k) => parseInt(k));
     const socketToNodes: { [socketId: number]: number[] } = {};
     allSockets.forEach((socketId) => {
-      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter((n) => n && !n.isJewelSocket && !n.isMastery);
+      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter(
+        (n) => n && !n.isJewelSocket && !n.isMastery && searchableNode(n)
+      );
       const validIndices = affected
         .map((n) => data.TreeToPassive[n.skill])
         .filter((n) => !!n)
@@ -292,7 +349,7 @@
 
     const query: MassReverseSearchConfig = {
       jewel: selectedJewel.value,
-      conqueror: selectedConqueror.value,
+      conqueror: calcConqueror,
       socketToNodes,
       stats: Object.keys(selectedStats).map((stat) => ({ ...selectedStats[parseInt(stat)] })),
       minTotalWeight
@@ -643,7 +700,7 @@
     }
 
     searchJewel = selectedJewel.value;
-    searchConqueror = selectedConqueror.value;
+    searchConqueror = isAnyConqueror ? null : selectedConqueror.value;
     searching = true;
     massSearchResults = undefined;
     searchResults = undefined;
@@ -654,7 +711,9 @@
       .filter((k) => skillTree.nodes[k]?.isJewelSocket);
     const socketToNodes: { [key: number]: number[] } = {};
     allSockets.forEach((socketId) => {
-      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter((n) => n && !n.isJewelSocket && !n.isMastery);
+      const affected = getAffectedNodes(skillTree.nodes[socketId]).filter(
+        (n) => n && !n.isJewelSocket && !n.isMastery && searchableNode(n)
+      );
       socketToNodes[socketId] = affected
         .map((n) => data.TreeToPassive[n.skill])
         .filter(Boolean)
@@ -666,7 +725,7 @@
       {
         jewel: selectedJewel.value,
         seeds: [seedSearchInput],
-        conquerors: [selectedConqueror.value],
+        conquerors: [calcConqueror],
         socketToNodes,
         stats: Object.values(selectedStats)
           .filter((s) => s.weight > 0)
@@ -769,11 +828,26 @@
                 <Select items={platforms} bind:value={platform} on:change={updateUrl} clearable={false} />
               </div>
               <button
-                class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40 disabled:cursor-not-allowed"
-                disabled={tradeResults.length === 0}
-                title="Open the trade site prefilled with all matching jewels"
-                onclick={() => openTrade(searchJewel, searchConqueror, tradeResults, platform.value, league.value)}>
-                Trade
+                class="p-1 px-3 bg-blue-500/40 rounded disabled:bg-blue-900/40 disabled:cursor-not-allowed whitespace-nowrap"
+                disabled={tradeQueries.length === 0}
+                title={tradeQueries.length > 1
+                  ? `${tradeResults.length} seeds need ${tradeQueries.length} trade links (${tradeBatchSize} seeds each)`
+                  : 'Open the trade site prefilled with all matching jewels'}
+                onclick={() =>
+                  tradeQueries.length > 1
+                    ? (showTradeLinks = !showTradeLinks)
+                    : openQuery(tradeQueries[0], platform.value, league.value)}>
+                {#if tradeQueries.length > 1}
+                  Trade ({tradeQueries.length}) {showTradeLinks ? '▴' : '▾'}
+                {:else}
+                  Trade
+                {/if}
+              </button>
+              <button
+                class="p-1 px-3 bg-blue-500/40 rounded whitespace-nowrap"
+                title="Legacy Traders: only online sellers. All Traders: also offline/merchant listings."
+                onclick={() => (isLegacyTradersMode = !isLegacyTradersMode)}>
+                {isLegacyTradersMode ? 'Legacy Traders' : 'All Traders'}
               </button>
             {/if}
           </div>
@@ -840,6 +914,7 @@
               {selectedJewel}
               {leagues}
               {conquerors}
+              {conquerorItems}
               bind:selectedConqueror
               bind:league
               bind:cachedJewels
@@ -857,6 +932,20 @@
           {/if}
         {/if}
 
+        {#if results && showTradeLinks}
+          <!-- A loose search can produce many batches; keep them from pushing the
+               results list off screen. -->
+          <div class="flex flex-wrap gap-2 my-2 max-h-40 overflow-y-auto shrink-0">
+            {#each tradeQueries as query, i}
+              <button
+                class="p-1 px-3 bg-blue-500/40 rounded"
+                onclick={() => openQuery(query, platform.value, league.value)}>
+                Batch {i + 1} ({Math.min(tradeBatchSize, tradeResults.length - i * tradeBatchSize)} seeds)
+              </button>
+            {/each}
+          </div>
+        {/if}
+
         {#if results}
           <ResultsPanel
             {searchResults}
@@ -866,6 +955,7 @@
             conqueror={searchConqueror}
             platform={platform.value}
             league={league.value}
+            {isLegacyTradersMode}
             onHighlight={highlight}
             onMassSelect={(socketId, resultSeed, passives) => {
               circledNode = socketId;

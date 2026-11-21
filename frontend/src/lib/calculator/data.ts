@@ -56,8 +56,29 @@ export const JewelType = {
   BrutalRestraint: 3,
   MilitantFaith: 4,
   ElegantHubris: 5,
-  HeroicTragedy: 6
+  HeroicTragedy: 6,
+  // Abyss jewels (3.27+). Engine-only for now: the UI's radius-based node picker does not
+  // apply to them (see abyss_region.ts / abyss_ascendancy.ts), so they are kept out of
+  // TIMELESS_JEWELS, which drives the jewel dropdown.
+  AbyssTecrod: 7,
+  AbyssUlaman: 8,
+  AbyssKurgal: 9,
+  AbyssAmanamu: 10,
+  AbyssZorath: 11
 } as const;
+
+// First jewel type whose bounded draws use MSVC rejection sampling instead of plain modulo.
+export const FIRST_ABYSS_JEWEL_TYPE = JewelType.AbyssTecrod;
+
+export const ABYSS_JEWEL_NAMES: Record<number, string> = {
+  7: 'Abyss Tecrod',
+  8: 'Abyss Ulaman',
+  9: 'Abyss Kurgal',
+  10: 'Abyss Amanamu',
+  11: 'Abyss Zorath'
+};
+
+export const ABYSS_CONQUEROR = 'Abyss';
 
 const TIMELESS_JEWELS: Record<number, string> = {
   1: 'Glorious Vanity',
@@ -110,7 +131,12 @@ const TIMELESS_JEWEL_CONQUERORS: Record<number, Record<string, TimelessJewelConq
     Vorana: { Index: 1, Version: 0 },
     Uhtred: { Index: 2, Version: 0 },
     Medved: { Index: 3, Version: 0 }
-  }
+  },
+  7: { Abyss: { Index: 0, Version: 0 } }, // AbyssTecrod
+  8: { Abyss: { Index: 0, Version: 0 } }, // AbyssUlaman
+  9: { Abyss: { Index: 0, Version: 0 } }, // AbyssKurgal
+  10: { Abyss: { Index: 0, Version: 0 } }, // AbyssAmanamu
+  11: { Abyss: { Index: 0, Version: 0 } } // AbyssZorath
 };
 
 // Matches data/jewels.go TimelessJewelSeedRanges exactly
@@ -120,7 +146,12 @@ const TIMELESS_JEWEL_SEED_RANGES: Record<number, Range> = {
   3: { Min: 500, Max: 8000, Special: false }, // BrutalRestraint
   4: { Min: 2000, Max: 10000, Special: false }, // MilitantFaith
   5: { Min: 2000, Max: 160000, Special: true }, // ElegantHubris
-  6: { Min: 100, Max: 8000, Special: false } // HeroicTragedy
+  6: { Min: 100, Max: 8000, Special: false }, // HeroicTragedy
+  7: { Min: 100, Max: 8000, Special: false }, // AbyssTecrod
+  8: { Min: 100, Max: 8000, Special: false }, // AbyssUlaman
+  9: { Min: 100, Max: 8000, Special: false }, // AbyssKurgal
+  10: { Min: 100, Max: 8000, Special: false }, // AbyssAmanamu
+  11: { Min: 100, Max: 8000, Special: false } // AbyssZorath
 };
 
 // ---- Helper functions (from data/manager.go) ----
@@ -166,6 +197,15 @@ export function getApplicableAlternatePassiveSkills(
 ): AlternatePassiveSkill[] {
   const psType = getPassiveSkillType(ps);
   return reverseAlternatePassiveSkills.get(psType)?.get(treeVersionIndex) ?? [];
+}
+
+// getApplicableAlternatePassiveSkills for an explicit passive type. Returns undefined (not an
+// empty list) when the tree version has no skills of that type, mirroring Go's nil slice.
+export function getAlternatePassiveSkillsOfType(
+  psType: PassiveSkillType,
+  treeVersionIndex: number
+): AlternatePassiveSkill[] | undefined {
+  return reverseAlternatePassiveSkills.get(psType)?.get(treeVersionIndex);
 }
 
 export function getApplicableAlternatePassiveAdditions(
@@ -366,8 +406,12 @@ interface RawAlternateTreeVersion {
   Id: string;
   Var1: boolean; // AreSmallAttributePassiveSkillsReplaced
   Var2: boolean; // AreSmallNormalPassiveSkillsReplaced
-  Var5: number; // MinimumAdditions
-  Var6: number; // MaximumAdditions
+  Var3: number; // MinimumAdditionsSmallAttribute
+  Var4: number; // MaximumAdditionsSmallAttribute
+  Var5: number; // MinimumAdditions (small normal)
+  Var6: number; // MaximumAdditions (small normal)
+  Var7: number; // MinimumAdditionsNotable
+  Var8: number; // MaximumAdditionsNotable
   Var9: number; // NotableReplacementSpawnWeight
 }
 
@@ -380,6 +424,8 @@ interface RawPassiveSkill {
   IsKeystone: boolean;
   IsNotable: boolean;
   IsJewelSocket: boolean;
+  AscendancyKey?: number | null;
+  DescendancyKey?: number | null;
 }
 
 interface RawStat {
@@ -511,8 +557,12 @@ async function _doInitialize(basePath: string): Promise<void> {
       ID: r.Id,
       AreSmallAttributePassiveSkillsReplaced: r.Var1,
       AreSmallNormalPassiveSkillsReplaced: r.Var2,
+      MinimumAdditionsSmallAttribute: r.Var3,
+      MaximumAdditionsSmallAttribute: r.Var4,
       MinimumAdditions: r.Var5,
       MaximumAdditions: r.Var6,
+      MinimumAdditionsNotable: r.Var7,
+      MaximumAdditionsNotable: r.Var8,
       NotableReplacementSpawnWeight: r.Var9
     })
   );
@@ -533,7 +583,9 @@ async function _doInitialize(basePath: string): Promise<void> {
       Name: r.Name,
       IsKeystone: r.IsKeystone,
       IsNotable: r.IsNotable,
-      IsJewelSocket: r.IsJewelSocket
+      IsJewelSocket: r.IsJewelSocket,
+      AscendancyKey: r.AscendancyKey ?? null,
+      DescendancyKey: r.DescendancyKey ?? null
     })
   );
 

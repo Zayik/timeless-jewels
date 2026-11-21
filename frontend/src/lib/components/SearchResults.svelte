@@ -10,7 +10,8 @@
     highlight: (newSeed: number, passives: number[]) => void;
     groupResults?: boolean;
     jewel: number;
-    conqueror: string;
+    // null means "any conqueror" — see constructQuery in trade.ts
+    conqueror: string | null;
     platform: string;
     league: string;
     isLegacyTradersMode?: boolean;

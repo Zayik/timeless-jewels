@@ -30,6 +30,10 @@ jobs:
         working-directory: ./frontend
         run: pnpm run check
 
+      - name: Test
+        working-directory: ./frontend
+        run: pnpm run test
+
   build-frontend:
     name: Build Frontend
     runs-on: ubuntu-latest

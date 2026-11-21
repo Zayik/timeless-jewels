@@ -64,6 +64,8 @@ timeless-jewels/
 │           │   ├── random.ts      # TinyMT32 PRNG (uint32 math via >>> 0)
 │           │   ├── tree_manager.ts # isPassiveSkillReplaced / replace / augment
 │           │   ├── index.ts       # Calculate, ReverseSearch, MassReverseSearch
+│           │   ├── abyss.ts       # Abyss jewel region / Zorath ascendancy walks (engine-only, no UI yet)
+│           │   ├── pob_fixtures.test.ts # vitest: grades the engine against Path of Building LUTs in testdata/
 │           │   ├── data.ts        # fetch + DecompressionStream loader, lookup maps
 │           │   └── types.ts       # Core types: PassiveSkill, AlternatePassiveSkill, Stat
 │           ├── components/
@@ -138,6 +140,12 @@ code was removed (digest comparison over ~1M `Calculate` results across all jewe
 conquerors, and seed ranges — 0 mismatches). If the algorithm or game data changes,
 re-verify against known-good seeds (e.g. GloriousVanity, Xibaqua, seed 2000) using
 community-documented transforms, since the Go oracle no longer exists.
+
+`cd frontend && pnpm run test` (vitest) grades the engine against the Path of Building
+fixtures in `testdata/` (legion draws, Abyss LUT + biased-tail draws, Abyss regions, Zorath
+ascendancy picks) that upstream (Vilsol/timeless-jewels) maintains. `abyss_regions.txt.gz` was
+dumped against the 3.29 tree, so that test loads `testdata/abyss/SkillTree-3.29.json.gz`;
+upstream's own Go test fails the same records on the 3.30 tree until the fixture is regenerated.
 
 ### UI verification
 Use the `claude-in-chrome` MCP browser automation tools:

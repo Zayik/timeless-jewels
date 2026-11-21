@@ -9,8 +9,11 @@ import type {
   AlternatePassiveSkillInformation,
   AlternatePassiveAdditionInformation
 } from './types';
-import { PassiveSkillType } from './types';
+import type { AlternateTreeVersion } from './types';
+import { PassiveSkillType, isAscendancyPassive } from './types';
 import {
+  FIRST_ABYSS_JEWEL_TYPE,
+  getAlternatePassiveSkillsOfType,
   getPassiveSkillType,
   getApplicableAlternatePassiveSkills,
   getApplicableAlternatePassiveAdditions,
@@ -25,6 +28,37 @@ function makeStatRolls(arr: number[]): Record<number, number> {
     result[i] = arr[i];
   }
   return result;
+}
+
+// Abyss tree versions draw bounded values with MSVC rejection sampling; legion ones use modulo.
+function usesMsvcDraw(treeVersionIndex: number): boolean {
+  return treeVersionIndex >= FIRST_ABYSS_JEWEL_TYPE;
+}
+
+// The candidates for an ascendancy notable, or undefined when the tree version has none. The
+// game tags Zorath's special ascendancy notables with PassiveType JewelSocket (5); no legion
+// version carries that type, so legion ascendancy nodes are untouched. Graded against Path of
+// Building's Zorath LUT: these roll with no notable pre-roll.
+function ascendancyAlternatePassiveSkills(
+  ps: PassiveSkill,
+  treeVersionIndex: number
+): AlternatePassiveSkill[] | undefined {
+  if (!ps.IsNotable || !isAscendancyPassive(ps)) {
+    return undefined;
+  }
+  return getAlternatePassiveSkillsOfType(PassiveSkillType.JewelSocket, treeVersionIndex);
+}
+
+// The addition count range for this passive's type; see AlternateTreeVersion.
+function additionRange(ps: PassiveSkill, treeVersion: AlternateTreeVersion): [number, number] {
+  switch (getPassiveSkillType(ps)) {
+    case PassiveSkillType.SmallAttribute:
+      return [treeVersion.MinimumAdditionsSmallAttribute, treeVersion.MaximumAdditionsSmallAttribute];
+    case PassiveSkillType.Notable:
+      return [treeVersion.MinimumAdditionsNotable, treeVersion.MaximumAdditionsNotable];
+    default:
+      return [treeVersion.MinimumAdditions, treeVersion.MaximumAdditions];
+  }
 }
 
 export function isPassiveSkillReplaced(
@@ -43,6 +77,10 @@ export function isPassiveSkillReplaced(
     return true;
   }
 
+  if (ascendancyAlternatePassiveSkills(ps, treeVersionIndex)) {
+    return true;
+  }
+
   if (ps.IsNotable) {
     const notableWeight = treeVersion.NotableReplacementSpawnWeight;
     if (notableWeight >= 100) {
@@ -51,7 +89,7 @@ export function isPassiveSkillReplaced(
     if (notableWeight === 0) {
       return false;
     }
-    rng.Reset(graphID, seed);
+    rng.Reset(graphID, seed, usesMsvcDraw(treeVersionIndex));
     return rng.Generate(0, 100) < notableWeight;
   }
 
@@ -88,11 +126,17 @@ export function replacePassiveSkill(
     };
   }
 
-  const applicableSkills = getApplicableAlternatePassiveSkills(ps, treeVersionIndex);
+  let applicableSkills = getApplicableAlternatePassiveSkills(ps, treeVersionIndex);
+  let notablePreRoll = getPassiveSkillType(ps) === PassiveSkillType.Notable;
+  const ascendancy = ascendancyAlternatePassiveSkills(ps, treeVersionIndex);
+  if (ascendancy) {
+    applicableSkills = ascendancy;
+    notablePreRoll = false;
+  }
 
-  rng.Reset(graphID, seed);
+  rng.Reset(graphID, seed, usesMsvcDraw(treeVersionIndex));
 
-  if (getPassiveSkillType(ps) === PassiveSkillType.Notable) {
+  if (notablePreRoll) {
     rng.Generate(0, 100);
   }
 
@@ -129,8 +173,9 @@ export function replacePassiveSkill(
     };
   }
 
-  const minAdditions = treeVersion.MinimumAdditions + rolledSkill.RandomMin;
-  const maxAdditions = treeVersion.MaximumAdditions + rolledSkill.RandomMax;
+  const [baseMin, baseMax] = additionRange(ps, treeVersion);
+  const minAdditions = baseMin + rolledSkill.RandomMin;
+  const maxAdditions = baseMax + rolledSkill.RandomMax;
 
   return {
     AlternatePassiveSkill: rolledSkill,
@@ -151,20 +196,15 @@ export function augmentPassiveSkill(
     return {};
   }
 
-  rng.Reset(graphID, seed);
+  rng.Reset(graphID, seed, usesMsvcDraw(treeVersionIndex));
 
   if (getPassiveSkillType(ps) === PassiveSkillType.Notable) {
     rng.Generate(0, 100);
   }
 
+  const [minAdditions, maxAdditions] = additionRange(ps, treeVersion);
   return {
-    AlternatePassiveAdditionInformations: rollAdditions(
-      treeVersion.MinimumAdditions,
-      treeVersion.MaximumAdditions,
-      rng,
-      ps,
-      treeVersionIndex
-    )
+    AlternatePassiveAdditionInformations: rollAdditions(minAdditions, maxAdditions, rng, ps, treeVersionIndex)
   };
 }
 
