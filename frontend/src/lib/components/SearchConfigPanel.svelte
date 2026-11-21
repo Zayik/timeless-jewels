@@ -112,9 +112,11 @@
     setSplit(split);
   });
 
+  // "Any" (see +page.svelte) stands for every conqueror of the jewel.
   const validConqueror = $derived(
     selectedConqueror &&
-      Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).indexOf(selectedConqueror.value) >= 0
+      (selectedConqueror.value === 'Any' ||
+        Object.keys(data.TimelessJewelConquerors[selectedJewel.value]).indexOf(selectedConqueror.value) >= 0)
   );
 
   // Color keys and helpers

@@ -25,6 +25,13 @@ export interface PassiveSkill {
   IsKeystone: boolean;
   IsNotable: boolean;
   IsJewelSocket: boolean;
+  AscendancyKey?: number | null;
+  DescendancyKey?: number | null;
+}
+
+// Covers bloodline (descendancy) nodes too; Zorath conquers both.
+export function isAscendancyPassive(ps: PassiveSkill): boolean {
+  return (ps.AscendancyKey ?? null) !== null || (ps.DescendancyKey ?? null) !== null;
 }
 
 export interface AlternateTreeVersion {
@@ -32,8 +39,15 @@ export interface AlternateTreeVersion {
   ID: string;
   AreSmallAttributePassiveSkillsReplaced: boolean;
   AreSmallNormalPassiveSkillsReplaced: boolean;
+  // Addition counts are per passive type: Var3/4 small attribute, Var5/6 small normal, Var7/8
+  // notable. Templar and Kalguuran carry unequal pairs, but only in arms those jewels never
+  // reach; Abyss (Var5/6 = 0, Var7/8 = 1) is the first where the split changes output.
+  MinimumAdditionsSmallAttribute: number;
+  MaximumAdditionsSmallAttribute: number;
   MinimumAdditions: number;
   MaximumAdditions: number;
+  MinimumAdditionsNotable: number;
+  MaximumAdditionsNotable: number;
   NotableReplacementSpawnWeight: number;
 }
 

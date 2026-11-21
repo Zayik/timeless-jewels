@@ -11,6 +11,9 @@ import {
 } from './data';
 import type { PassiveSkill, AlternatePassiveSkillInformation } from './types';
 import { isPassiveSkillReplaced, replacePassiveSkill, augmentPassiveSkill } from './tree_manager';
+import { data } from './data';
+import { abyssAscendancyNotable, abyssConqueredNodes } from './abyss';
+import type { AbyssTreeNodes } from './abyss';
 
 // Cache structure: conqueror -> jewelType -> realSeed -> passiveIndex -> result
 const calculationCache = new Map<string, Map<number, Map<number, Map<number, AlternatePassiveSkillInformation>>>>();
@@ -599,11 +602,35 @@ function TargetedMassMarketSearch(
   })();
 }
 
+// The skill tree is only needed by the Abyss walks; parse it once, on first use.
+let parsedTreeSource = '';
+let parsedTreeNodes: AbyssTreeNodes = {};
+function treeNodes(): AbyssTreeNodes {
+  const source = data.SkillTree;
+  if (source !== parsedTreeSource) {
+    parsedTreeNodes = source ? (JSON.parse(source).nodes as AbyssTreeNodes) : {};
+    parsedTreeSource = source;
+  }
+  return parsedTreeNodes;
+}
+
+// Graph ids of the passives a socket-keyed Abyss jewel conquers for a seed (see abyss.ts).
+function AbyssConqueredNodes(socketID: number, seed: number, timelessJewelType: number): number[] | undefined {
+  return abyssConqueredNodes(treeNodes(), socketID, seed, timelessJewelType);
+}
+
+// Graph id of the ascendancy notable Abyss Zorath conquers for a seed (see abyss.ts).
+function AbyssAscendancyNotable(seed: number, ascendancy: string): number | undefined {
+  return abyssAscendancyNotable(treeNodes(), seed, ascendancy);
+}
+
 function ClearCache(): void {
   calculationCache.clear();
 }
 
 export const calculator = {
+  AbyssAscendancyNotable,
+  AbyssConqueredNodes,
   Calculate,
   ClearCache,
   MassReverseSearch,

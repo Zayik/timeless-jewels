@@ -8,9 +8,11 @@
     massSearchResults?: MassSearchResults;
     groupResults: boolean;
     jewel: number;
-    conqueror: string;
+    // null means "any conqueror" — see constructQuery in trade.ts
+    conqueror: string | null;
     platform: string;
     league: string;
+    isLegacyTradersMode?: boolean;
     onHighlight: (seed: number, passives: number[]) => void;
     onMassSelect: (socketId: number, seed: number, passives: number[]) => void;
     onSocketFocus: (socketId: number) => void;
@@ -24,6 +26,7 @@
     conqueror,
     platform,
     league,
+    isLegacyTradersMode = false,
     onHighlight,
     onMassSelect,
     onSocketFocus
@@ -46,7 +49,15 @@
 </script>
 
 {#if searchResults}
-  <SearchResults {searchResults} {groupResults} highlight={onHighlight} {jewel} {conqueror} {platform} {league} />
+  <SearchResults
+    {searchResults}
+    {groupResults}
+    highlight={onHighlight}
+    {jewel}
+    {conqueror}
+    {platform}
+    {league}
+    {isLegacyTradersMode} />
 {/if}
 
 {#if massSearchResults}
@@ -79,7 +90,8 @@
                   {jewel}
                   {conqueror}
                   {platform}
-                  {league} />
+                  {league}
+                  {isLegacyTradersMode} />
               </div>
             {/if}
           {/each}

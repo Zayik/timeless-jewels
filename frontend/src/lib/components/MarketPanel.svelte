@@ -14,6 +14,8 @@
     selectedJewel: { value: number; label: string };
     leagues: { value: string; label: string }[];
     conquerors: { value: string; label: string }[];
+    // Picker options: the jewel's conquerors, plus "Any" when there is more than one.
+    conquerorItems?: { value: string; label: string }[];
     selectedConqueror?: { value: string; label: string };
     league?: { value: string; label: string };
     cachedJewels?: MarketJewel[];
@@ -29,6 +31,7 @@
     selectedJewel,
     leagues,
     conquerors,
+    conquerorItems,
     selectedConqueror = $bindable<{ value: string; label: string } | undefined>(),
     league = $bindable<{ value: string; label: string } | undefined>(),
     cachedJewels = $bindable([]),
@@ -222,10 +225,16 @@
       <div class="border-t border-gray-700 pt-2">
         <span class="text-xs text-gray-400">Conqueror</span>
         <Select
-          items={conquerors}
+          items={conquerorItems ?? conquerors}
           bind:value={selectedConqueror}
           clearable={false}
           on:change={() => onConquerorChange?.()} />
+        {#if selectedConqueror?.value === 'Any'}
+          <div class="mt-1 text-xs text-gray-400">
+            Keystones are left out of searches (they are the only passive the conqueror changes), and trade links match
+            every conqueror.
+          </div>
+        {/if}
 
         {#if conquerorKeystones.length > 0}
           <div class="mt-2 space-y-1 text-xs">

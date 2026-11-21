@@ -46,14 +46,58 @@ const platformRealms: { [key: string]: string } = {
   Playstation: 'sony'
 };
 
+const max_filter_length = 45;
+const max_filters = 4;
+
+const chunk = <T>(items: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+};
+
+interface TradeFilter {
+  id: string;
+  value: { min: number; max: number };
+  disabled?: boolean;
+}
+interface TradeStatGroup {
+  type: 'count';
+  value: { min: number };
+  filters: TradeFilter[];
+  disabled: boolean;
+}
+
+/**
+ * How many seeds fit into one trade link.
+ *
+ * A specific conqueror costs one filter per seed. `null` (any conqueror) costs
+ * one filter per conqueror per seed, so capacity drops by the conqueror count.
+ */
+export const seedsPerQuery = (jewel: number, conqueror: string | null): number => {
+  if (conqueror !== null) {
+    return max_filter_length * max_filters;
+  }
+
+  const conquerors = Object.keys(tradeStatNames[jewel] ?? {});
+  return Math.floor(max_filter_length / conquerors.length) * max_filters;
+};
+
+/**
+ * Build a single trade query. Pass `null` as the conqueror to match a seed on
+ * any conqueror — valid only because the conqueror influences nothing but the
+ * keystone, so callers must exclude keystones from the search first.
+ *
+ * Results beyond `seedsPerQuery` are dropped; use `constructQueries` to spread
+ * a larger result set across several links.
+ */
 export const constructQuery = <T extends SeedRef>(
   jewel: number,
-  conqueror: string,
+  conqueror: string | null,
   result: T[],
   isLegacyTradersMode = false
 ) => {
-  const max_filter_length = 45;
-  const max_filters = 4;
   const max_query_length = max_filter_length * max_filters;
 
   if (result.length === 0) {
@@ -63,24 +107,33 @@ export const constructQuery = <T extends SeedRef>(
   if (conquerors.length === 0) {
     throw new Error(`constructQuery: unknown jewel type ${jewel}`);
   }
-  if (!conquerors.includes(conqueror)) {
+  if (conqueror !== null && !conquerors.includes(conqueror)) {
     throw new Error(`constructQuery: unknown conqueror "${conqueror}" for jewel ${jewel}`);
   }
 
-  interface TradeFilter {
-    id: string;
-    value: { min: number; max: number };
-    disabled?: boolean;
-  }
-  interface TradeStatGroup {
-    type: 'count';
-    value: { min: number };
-    filters: TradeFilter[];
-    disabled: boolean;
-  }
   const final_query: TradeStatGroup[] = [];
 
-  if (result.length === 1) {
+  if (conqueror === null) {
+    // Any conqueror: every stat group ORs each of its seeds across all of the
+    // jewel's conqueror stat IDs. A seed's variants must stay together in one
+    // group — trade ANDs separate groups, so splitting them would ask for a
+    // jewel that is two conquerors at once.
+    const seedsPerGroup = Math.floor(max_filter_length / conquerors.length);
+
+    for (const [i, batch] of chunk(result.slice(0, seedsPerGroup * max_filters), seedsPerGroup).entries()) {
+      final_query.push({
+        type: 'count',
+        value: { min: 1 },
+        filters: batch.flatMap((r) =>
+          conquerors.map((conq) => ({
+            id: tradeStatNames[jewel][conq],
+            value: { min: r.seed, max: r.seed }
+          }))
+        ),
+        disabled: i != 0
+      });
+    }
+  } else if (result.length === 1) {
     final_query.push({
       type: 'count',
       value: { min: 1 },
@@ -137,6 +190,23 @@ export const constructQuery = <T extends SeedRef>(
   };
 };
 
+export type TradeQuery = ReturnType<typeof constructQuery>;
+
+/**
+ * Split a result set across as many trade links as it takes to cover every
+ * seed. One query is the common case; anything past `seedsPerQuery` used to be
+ * silently truncated (issues #7, #14).
+ */
+export const constructQueries = <T extends SeedRef>(
+  jewel: number,
+  conqueror: string | null,
+  results: T[],
+  isLegacyTradersMode = false
+): TradeQuery[] =>
+  chunk(results, seedsPerQuery(jewel, conqueror)).map((batch) =>
+    constructQuery(jewel, conqueror, batch, isLegacyTradersMode)
+  );
+
 export const tradeUrl = (platform: string, league: string): string => {
   if (!platform || typeof platform !== 'string') {
     platform = 'PC';
@@ -150,18 +220,20 @@ export const tradeUrl = (platform: string, league: string): string => {
   return `https://www.pathofexile.com/trade/search${realm ? `/${realm}` : ''}/${encodeURIComponent(league)}`;
 };
 
-export const openTrade = <T extends SeedRef>(
-  jewel: number,
-  conqueror: string,
-  results: T[],
-  platform: string,
-  league: string,
-  isLegacyTradersMode = false
-) => {
+export const openQuery = (query: TradeQuery, platform: string, league: string) => {
   const url = new URL(tradeUrl(platform, league));
-  url.searchParams.set('q', JSON.stringify(constructQuery(jewel, conqueror, results, isLegacyTradersMode)));
+  url.searchParams.set('q', JSON.stringify(query));
 
   console.log('opening trade', url);
 
   window.open(url, '_blank');
 };
+
+export const openTrade = <T extends SeedRef>(
+  jewel: number,
+  conqueror: string | null,
+  results: T[],
+  platform: string,
+  league: string,
+  isLegacyTradersMode = false
+) => openQuery(constructQuery(jewel, conqueror, results, isLegacyTradersMode), platform, league);
