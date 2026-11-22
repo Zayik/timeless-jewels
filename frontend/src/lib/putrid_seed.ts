@@ -38,6 +38,7 @@ export const OIL_BY_ID: Record<string, Oil> = Object.fromEntries(OILS.map((o) =>
 
 export interface PutridNotable {
   name: string;
+  icon?: string; // sprite key, e.g. "Art/2DArt/SkillIcons/passives/MindPact.png"
   stats: string[];
   recipe: string[]; // as listed in the tree, may repeat an oil
   oils: string[]; // distinct oils in the recipe, cheapest first
@@ -185,6 +186,7 @@ export const loadPutridNotables = (tree: Pick<SkillTreeData, 'nodes'>): PutridNo
     const stats = (node.stats ?? []).map(cleanStat);
     byName.set(node.name, {
       name: node.name,
+      icon: node.icon,
       stats,
       recipe: [...node.recipe].sort((a, b) => tierOf(a) - tierOf(b)),
       oils: [...new Set(node.recipe)].sort((a, b) => tierOf(a) - tierOf(b)),
@@ -279,4 +281,31 @@ export const sortRanks = (ranks: ComboRank[], by: RankSort): ComboRank[] => {
   return [...ranks].sort(
     (a, b) => key(b) - key(a) || b.hits.length - a.hits.length || b.share - a.share || a.pool.length - b.pool.length
   );
+};
+
+// ---- Icons ----
+
+export interface NotableIcon {
+  url: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  sheetW: number;
+  sheetH: number;
+}
+
+type SpriteSheets = Record<
+  string,
+  { filename: string; w: number; h: number; coords: Record<string, { x: number; y: number; w: number; h: number }> }
+>;
+
+// Looks a notable's icon up in the tree's notable sprite sheet, at the largest zoom.
+export const notableIconLookup = (sheets: SpriteSheets | undefined) => {
+  const zoom = Object.keys(sheets ?? {}).sort((a, b) => parseFloat(b) - parseFloat(a))[0];
+  const sheet = zoom ? sheets?.[zoom] : undefined;
+  return (icon: string | undefined): NotableIcon | undefined => {
+    const c = icon && sheet ? sheet.coords[icon] : undefined;
+    return c && sheet ? { url: sheet.filename, ...c, sheetW: sheet.w, sheetH: sheet.h } : undefined;
+  };
 };
