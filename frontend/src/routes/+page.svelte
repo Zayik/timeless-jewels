@@ -821,9 +821,9 @@
   disabled={[...disabled]}>
   {#if !collapsed}
     <div
-      class="w-screen md:w-10/12 lg:w-2/3 xl:w-1/2 2xl:w-5/12 3xl:w-1/3 4xl:w-1/4 lg:min-w-[820px] max-w-full absolute top-0 left-0 themed rounded-br-lg max-h-screen {putridSeed
-        ? 'bg-black'
-        : 'bg-black/80 backdrop-blur-sm'}">
+      class="max-w-full absolute top-0 left-0 themed rounded-br-lg max-h-screen {putridSeed
+        ? 'w-screen xl:w-[1200px] bg-black'
+        : 'w-screen md:w-10/12 lg:w-2/3 xl:w-1/2 2xl:w-5/12 3xl:w-1/3 4xl:w-1/4 lg:min-w-[820px] bg-black/80 backdrop-blur-sm'}">
       <div class="p-4 max-h-screen flex flex-col">
         <div class="flex flex-row flex-wrap justify-between items-center gap-2 mb-2">
           <div class="flex flex-row flex-wrap items-center gap-2">
