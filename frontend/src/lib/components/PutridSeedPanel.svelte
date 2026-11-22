@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
   import { skillTree } from '../skill_tree';
   import {
     CATEGORIES,
@@ -59,13 +60,12 @@
       return [];
     }
   };
-  let selected = $state(new Set<string>(loadSelected()));
+  // SvelteSet tracks each key, so toggling one card only re-renders that card.
+  const selected = new SvelteSet<string>(loadSelected());
   $effect(() => safeSet(SELECTED_KEY, JSON.stringify([...selected])));
 
   const setMany = (names: string[], on: boolean) => {
-    const next = new Set(selected);
-    names.forEach((n) => (on ? next.add(n) : next.delete(n)));
-    selected = next;
+    names.forEach((n) => (on ? selected.add(n) : selected.delete(n)));
   };
   const toggleNotable = (name: string) => setMany([name], !selected.has(name));
 
@@ -74,18 +74,16 @@
   // ---- Browse ----
 
   let search = $state('');
-  let filterCats = $state(new Set<string>());
+  const filterCats = new SvelteSet<string>();
   let matchAll = $state(false);
   let selectedOnly = $state(false);
 
   const toggleFilter = (name: string) => {
-    const next = new Set(filterCats);
-    if (next.has(name)) {
-      next.delete(name);
+    if (filterCats.has(name)) {
+      filterCats.delete(name);
     } else {
-      next.add(name);
+      filterCats.add(name);
     }
-    filterCats = next;
   };
 
   const query = $derived(search.trim().toLowerCase());
@@ -159,6 +157,31 @@
   };
 
   const ICON_SIZE = 44;
+
+  // Every icon shares one sprite sheet. Setting its URL once as a CSS variable keeps it out
+  // of each card's inline style (the sheet can be a large data URI).
+  const firstIcon = notables.map((n) => iconOf(n.icon)).find(Boolean);
+  const spriteUrl = firstIcon ? `url('${firstIcon.url}')` : 'none';
+
+  // Render cards in pages as the list scrolls, so a filter change builds ~60 cards, not 472.
+  const PAGE = 60;
+  let browseLimit = $state(PAGE);
+  $effect(() => {
+    void shown;
+    browseLimit = PAGE;
+  });
+  const loadMore = (node: HTMLElement) => {
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          browseLimit += PAGE;
+        }
+      },
+      { rootMargin: '600px' }
+    );
+    io.observe(node);
+    return { destroy: () => io.disconnect() };
+  };
 </script>
 
 {#snippet oilDot(id: string)}
@@ -185,8 +208,8 @@
     {@const s = size / ic.w}
     <span
       class="notable-icon shrink-0"
-      style="width: {size}px; height: {size}px; background-image: url('{ic.url}'); background-position: -{ic.x *
-        s}px -{ic.y * s}px; background-size: {ic.sheetW * s}px {ic.sheetH * s}px;"></span>
+      style="width: {size}px; height: {size}px; background-position: -{ic.x * s}px -{ic.y *
+        s}px; background-size: {ic.sheetW * s}px {ic.sheetH * s}px;"></span>
   {:else}
     <span class="notable-icon shrink-0 bg-neutral-700" style="width: {size}px; height: {size}px;"></span>
   {/if}
@@ -228,7 +251,7 @@
   </button>
 {/snippet}
 
-<div class="flex flex-col gap-2 overflow-auto min-h-0 mt-2 pr-1">
+<div class="flex flex-col gap-2 overflow-auto min-h-0 mt-2 pr-1" style:--putrid-sprite={spriteUrl}>
   <div class="text-xs text-amber-300/90 bg-amber-900/20 rounded p-2">
     A Putrid Seed grows up to {GROWN_DRAWS} notables, drawn from the notables whose anoint recipe uses only the oils you put
     in. That rule was seen in 50 test anoints with Clear, Sepia and Amber (all 10 of their notables grew, nothing else did)
@@ -278,7 +301,7 @@
           all of them
         </button>
         {#if filterCats.size}
-          <button class="underline" onclick={() => (filterCats = new Set())}>clear categories</button>
+          <button class="underline" onclick={() => filterCats.clear()}>clear categories</button>
         {/if}
       </div>
       {#each CATEGORY_GROUPS as group (group)}
@@ -341,10 +364,17 @@
       <div class="text-neutral-400 text-sm">No notables match. Clear the search or pick other categories.</div>
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
-        {#each shown as n (n.name)}
+        {#each shown.slice(0, browseLimit) as n (n.name)}
           {@render card(n)}
         {/each}
       </div>
+      {#if browseLimit < shown.length}
+        {#key browseLimit}
+          <div use:loadMore class="text-xs text-neutral-500 py-2">
+            Loading more ({shown.length - browseLimit} left)…
+          </div>
+        {/key}
+      {/if}
     {/if}
   {:else if tab === 'oils'}
     {#if selected.size === 0}
@@ -519,8 +549,13 @@
 </div>
 
 <style>
+  .card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 150px;
+  }
   .notable-icon {
     display: inline-block;
+    background-image: var(--putrid-sprite);
     border-radius: 9999px;
     background-repeat: no-repeat;
     box-shadow:

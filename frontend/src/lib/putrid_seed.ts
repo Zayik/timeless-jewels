@@ -36,12 +36,22 @@ export const OILS: Oil[] = [
 
 export const OIL_BY_ID: Record<string, Oil> = Object.fromEntries(OILS.map((o) => [o.id, o]));
 
+const OIL_BIT: Record<string, number> = Object.fromEntries(OILS.map((o, i) => [o.id, 1 << i]));
+export const oilMask = (oils: Iterable<string>): number => {
+  let m = 0;
+  for (const o of oils) {
+    m |= OIL_BIT[o] ?? 1 << 30;
+  }
+  return m;
+};
+
 export interface PutridNotable {
   name: string;
   icon?: string; // sprite key, e.g. "Art/2DArt/SkillIcons/passives/MindPact.png"
   stats: string[];
   recipe: string[]; // as listed in the tree, may repeat an oil
   oils: string[]; // distinct oils in the recipe, cheapest first
+  mask: number; // bit per oil (OILS index), for fast pool checks
   blighted: boolean; // anoint-only notable that is not on the normal tree
   categories: string[];
   searchText: string; // lowercased name + stats, for filtering
@@ -190,6 +200,7 @@ export const loadPutridNotables = (tree: Pick<SkillTreeData, 'nodes'>): PutridNo
       stats,
       recipe: [...node.recipe].sort((a, b) => tierOf(a) - tierOf(b)),
       oils: [...new Set(node.recipe)].sort((a, b) => tierOf(a) - tierOf(b)),
+      mask: oilMask(node.recipe),
       blighted: !!node.isBlighted,
       categories: categorize(stats),
       searchText: (node.name + '\n' + stats.join('\n')).toLowerCase()
@@ -204,11 +215,11 @@ export const loadPutridNotables = (tree: Pick<SkillTreeData, 'nodes'>): PutridNo
 export const recipeCost = (n: PutridNotable): number => n.recipe.reduce((s, o) => s + tierOf(o), 0);
 
 // The pool rule: a notable can grow when every oil in its recipe is one of the chosen oils.
-export const inPool = (n: PutridNotable, oils: ReadonlySet<string>): boolean => n.oils.every((o) => oils.has(o));
+export const inPool = (n: PutridNotable, mask: number): boolean => (n.mask & ~mask) === 0;
 
 export const poolFor = (notables: PutridNotable[], oils: Iterable<string>): PutridNotable[] => {
-  const set = new Set(oils);
-  return notables.filter((n) => inPool(n, set));
+  const mask = oilMask(oils);
+  return notables.filter((n) => inPool(n, mask));
 };
 
 // Distinct oil sets to rank. Three different oils gives 364 sets. With repeats allowed
@@ -254,12 +265,14 @@ export const rankCombos = (
   allowRepeats: boolean
 ): ComboRank[] => {
   const ranks: ComboRank[] = [];
+  const wanted = notables.filter((n) => wishlist.has(n.name));
   for (const oils of oilSets(allowRepeats)) {
-    const pool = poolFor(notables, oils);
-    const hits = pool.filter((n) => wishlist.has(n.name));
-    if (hits.length === 0 || pool.length === 0) {
+    const mask = oilMask(oils);
+    const hits = wanted.filter((n) => inPool(n, mask));
+    if (hits.length === 0) {
       continue;
     }
+    const pool = notables.filter((n) => inPool(n, mask));
     const share = hits.length / pool.length;
     const missOne = 1 - 1 / pool.length;
     ranks.push({
