@@ -19,6 +19,7 @@
   import ResultsPanel from '../lib/components/ResultsPanel.svelte';
   import MarketPanel from '../lib/components/MarketPanel.svelte';
   import SearchConfigPanel from '../lib/components/SearchConfigPanel.svelte';
+  import PutridSeedPanel from '../lib/components/PutridSeedPanel.svelte';
   import { data, calculator } from '../lib/types';
   import { onMount } from 'svelte';
   import {
@@ -43,6 +44,13 @@
   let selectedJewel = $state(
     searchParams.has('jewel') ? jewels.find((j) => j.value == searchParams.get('jewel')) : undefined
   );
+
+  // The Putrid Seed is not a timeless jewel (no seed, no conqueror), so it sits in the same
+  // dropdown but drives its own panel and leaves selectedJewel unset.
+  const PUTRID_SEED = { value: -1, label: 'Putrid Seed' };
+  const PUTRID_PARAM = 'putrid-seed';
+  let putridSeed = $state(searchParams.get('jewel') === PUTRID_PARAM);
+  let jewelChoice = $state(putridSeed ? PUTRID_SEED : selectedJewel);
 
   const conquerors = $derived(
     selectedJewel
@@ -131,6 +139,11 @@
 
   const updateUrl = () => {
     const url = new URL(window.location.origin + window.location.pathname);
+    if (putridSeed) {
+      url.searchParams.append('jewel', PUTRID_PARAM);
+      goto(url.toString());
+      return;
+    }
     selectedJewel && url.searchParams.append('jewel', selectedJewel.value.toString());
     selectedConqueror && url.searchParams.append('conqueror', selectedConqueror.value);
     seed && url.searchParams.append('seed', seed.toString());
@@ -183,6 +196,12 @@
   const changeJewel = () => {
     selectedStats = {};
     updateUrl();
+  };
+
+  const onJewelChoice = () => {
+    putridSeed = jewelChoice?.value === PUTRID_SEED.value;
+    selectedJewel = putridSeed ? undefined : jewelChoice;
+    changeJewel();
   };
 
   let results = $state(false);
@@ -453,6 +472,8 @@
     mode = 'seed';
     seed = newSeed;
     selectedJewel = jewel;
+    jewelChoice = jewel;
+    putridSeed = false;
     selectedConqueror = { label: conqueror, value: conqueror };
     updateUrl();
   };
@@ -800,7 +821,9 @@
   disabled={[...disabled]}>
   {#if !collapsed}
     <div
-      class="w-screen md:w-10/12 lg:w-2/3 xl:w-1/2 2xl:w-5/12 3xl:w-1/3 4xl:w-1/4 lg:min-w-[820px] max-w-full absolute top-0 left-0 bg-black/80 backdrop-blur-sm themed rounded-br-lg max-h-screen">
+      class="max-w-full absolute top-0 left-0 themed rounded-br-lg max-h-screen {putridSeed
+        ? 'w-screen xl:w-[1200px] bg-black'
+        : 'w-screen md:w-10/12 lg:w-2/3 xl:w-1/2 2xl:w-5/12 3xl:w-1/3 4xl:w-1/4 lg:min-w-[820px] bg-black/80 backdrop-blur-sm'}">
       <div class="p-4 max-h-screen flex flex-col">
         <div class="flex flex-row flex-wrap justify-between items-center gap-2 mb-2">
           <div class="flex flex-row flex-wrap items-center gap-2">
@@ -814,7 +837,7 @@
               {#if results}
                 <span>Results</span>
               {:else}
-                <span>Timeless Jewel</span>
+                <span>{putridSeed ? 'Putrid Seed' : 'Timeless Jewel'}</span>
               {/if}
             </h3>
 
@@ -869,7 +892,18 @@
         </div>
 
         {#if !results}
-          <Select items={jewels} bind:value={selectedJewel} on:change={changeJewel} />
+          <Select
+            items={[...jewels, PUTRID_SEED]}
+            bind:value={jewelChoice}
+            on:change={onJewelChoice}
+            on:clear={() => {
+              jewelChoice = undefined;
+              onJewelChoice();
+            }} />
+
+          {#if putridSeed}
+            <PutridSeedPanel />
+          {/if}
 
           {#if selectedJewel}
             <SearchConfigPanel
